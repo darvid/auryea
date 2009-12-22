@@ -207,6 +207,11 @@ main () {
           for p in "$@"; do
             [[ $p == "--" ]] && continue
             r=$(aur info "$p")
+            if [[ $? == 9 && $AURYEA_WRAP_PACMAN == 1 ]]; then
+              echo "couldn't find package in AUR, falling back to pacman" >&2
+              sudo pacman -S "$p"
+              exit $?
+            fi
             i=$(pacman -Q "$p" 2> /dev/null)
             if [[ $? != 0 ]]; then
               echo "syncing \`$p'..."
