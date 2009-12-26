@@ -1,5 +1,7 @@
 #!/bin/bash
 
+[[ $UID == 0 ]] && echo "warning: running as root can kill kittens" >&2
+
 [[ -z $AURYEA_WRAP_PACMAN ]] && AURYEA_WRAP_PACMAN=1
 [[ -z $AURYEA_TMP_DIRECTORY ]] && AURYEA_TMP_DIRECTORY="/tmp/auryea-${USER}/"
 [[ -z $MAKEPKG_OPTS ]] && MAKEPKG_OPTS="-i"
@@ -50,8 +52,11 @@ version () {
 
 gk () {
   [[ "$#" == 1 ]] && local l=$(cat /dev/stdin)
-  vg -o "\"${2:-$1}\":\"[^\"]+\"" "${l:-$1}" | sed 's/"[^"]\+":"\([^"]\+\)"/\1/'
-  return $?
+  local in="${l:-$1}"
+  local t1="${in##*${2:-$1}\":\"}"
+  echo "${t1%%\"*}"
+  # vg -o "\"${2:-$1}\":\"[^\"]+\"" "${l:-$1}" | sed 's/"[^"]\+":"\([^"]\+\)"/\1/'
+  # return $?
 }
 
 vg () {
@@ -60,11 +65,13 @@ vg () {
 }
 
 sudo () {
+  [[ $UID == 0 ]] && return
   if builtin type -P sudo &> /dev/null; then
     command sudo "$@"
   else
     su -c "$@"
   fi
+  return $?
 }
 
 install () {
@@ -93,7 +100,7 @@ aur () {
   o="$(wget -q -O- "${RPCURL}?type=${1}&arg=${2}")"
   [[ $? -gt 0 ]] && return $?
   if [[ $(gk "$o" "type") == 'error' ]]; then
-    echo "$(gk "$o" "results")"
+    echo "error: $(gk "$o" "results")"
     return 9
   fi
   case "$1" in
@@ -107,14 +114,14 @@ aur () {
 }
 
 main () {
-  local a i r so lo
+  local a i r so lo ao
   [[ -z "$1" ]] && usage
   so="VQRSUcdeghiklmo:p:s:tuqvr:b:nfwy"
   lo="changelog,deps,explicit,groups,info,check,list,foreign,owns:,file:,search:,\
   unrequired,upgrades,quiet,config:,logfile:,noconfirm,noprogressbar,noscriptlet,\
   verbose,debug,root:,dbpath:,cachedir:,asdeps,asexplicit,clean,nodeps,force,\
   print-uris,sysupgrade,downloadonly,refresh,needed,ignore:,ignoregroup:,cascade,\
-  dbonly,nosave,recursive,unneeded,help"
+  dbonly,nosave,recursive,unneeded,help,version"
   if grep -q 'S' <<< "$@"; then
     lo=$(sed 's/list/list:/' <<< "$lo")
   fi
@@ -128,10 +135,19 @@ main () {
         [[ $AURYEA_WRAP_PACMAN == 1 ]] && pacman --version; echo -e '---\n'
         version
         ;;
+      -Q|-R|-U)
+        shift
+        if [[ $AURYEA_WRAP_PACMAN == 1 ]]; then
+          pacman -Q "$ao" "$@"
+          exit $?
+        else
+          exit
+        fi
+        ;;
       -S)
         ACTION=sync
         ;;
-      -c)
+      -c|--clean)
         local d pkgs v1 v2 vc
         echo "cache directory: ${AURYEA_TMP_DIRECTORY}"
         read -n1 -p "really remove outdated packages? [Y/n] "
@@ -168,7 +184,7 @@ main () {
         fi
         [[ $AURYEA_WRAP_PACMAN == 1 ]] && sudo pacman -Scc
         ;;
-      -s)
+      -s|--search)
         ACTION=search
         echo -n "searching AUR..."
         r=$(aur search "$2")
@@ -190,21 +206,58 @@ main () {
             mapfile -t arr <<< "$r"
             for ((i=0; i<"${#arr[@]}"; i++)); do
               echo -n "${CATEGORIES[$(gk "${arr[$i]}" CategoryID)]}/"
-              echo "$(gk "${arr[$i]}" Name)"
+              echo "$(gk "${arr[$i]}" Name) $(gk "${arr[$i]}" Version)"
               echo -e "$(gk "${arr[$i]}" Description | fold -s | sed 's/\(.*\)/    \1/')"
             done
             [[ $AURYEA_PACMAN_SEARCH == 1 ]] && pacman -Ss "$2"
             ;;
         esac
         ;;
-      -*)
-        if [[ -z "$ACTION" ]]; then
-          if [[ $AURYEA_WRAP_PACMAN == 1 ]]; then
-              pacman "${@:1:$((${#@}-1))}"
-              exit $?
+      -u|--sysupgrade)
+        if [[ $ACTION != "sync" ]]; then
+          echo "error: invalid/no operation specified" >&2
+          exit 1
+        fi
+        if [[ $AURYEA_WRAP_PACMAN == 1 ]]; then
+          shift
+          sudo pacman -Su "$ao" "${@:2:$#}"
+          echo
+          if [[ $? -gt 0 ]]; then
+            local rv=$?
+            read -n1 -p "pacman borked. really attempt to upgrade AUR packages? (!recommended) [Y/n]"
+            [[ $REPLY != [Yy] ]] && exit $rv
           fi
-        elif [[ "$ACTION" == "sync" ]]; then
-          for p in "$@"; do
+        fi
+        echo "checking AUR for updates...this could take a while"
+        IFS=$'\n'
+        local ip ap pv vc
+        ap=( )
+        for p in $(pacman -Qme); do
+          ip="$(aur info ${p%% *})"
+          [[ $? -gt 0 ]] && continue
+          pv=$(gk "$ip" Version)
+          vc=$(vercmp "${p##* }" $pv)
+          if [[ $vc == 0 ]]; then
+            continue
+          elif [[ $vc == 1 ]]; then
+            echo "warning: $p: local (${p##* }) is newer than AUR ($pv)" >&2
+          else
+            echo " * ${CATEGORIES[$(gk "$ip" CategoryID)]}/${p%% *} (${p##* } -> $pv)"
+            ap+=( "${p%% *}" "$pv" "$(gk "$ip" URLPath)")
+          fi
+        done
+        read -n1 -p "upgrade these packages? [Y/n] "
+        [[ $REPLY != [Yy] ]] && exit
+        echo
+        for ((i=0; i<${#ap[@]}; i=i+3)); do
+          echo "upgrading ${ap[$i]}..."
+          install "${ap[$i]}" "${ap[$((i+2))]}"
+        done
+        unset ip ap v2 vc
+        ;;
+      --)
+        if [[ "$ACTION" == "sync" ]]; then
+          for p in "${@:2:$#}"; do
             [[ $p == "--" ]] && continue
             r=$(aur info "$p")
             if [[ $? == 9 && $AURYEA_WRAP_PACMAN == 1 ]]; then
@@ -231,10 +284,11 @@ main () {
             install "$(gk "$r" Name)" "$(gk "$r" URLPath)"
           done
         fi
-        ;;
-      --)
         shift
         break
+        ;;
+      -*)
+        ao+="$1 "
         ;;
     esac
     shift
