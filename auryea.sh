@@ -2,9 +2,11 @@
 
 [[ $UID == 0 ]] && echo "warning: running as root can kill kittens" >&2
 
-[[ -z $AURYEA_WRAP_PACMAN ]] && AURYEA_WRAP_PACMAN=1
-[[ -z $AURYEA_TMP_DIRECTORY ]] && AURYEA_TMP_DIRECTORY="/tmp/auryea-${USER}/"
-[[ -z $MAKEPKG_OPTS ]] && MAKEPKG_OPTS="-i"
+AURYEA_WRAP_PACMAN=${AURYEA_WRAP_PACMAN:-1}
+AURYEA_USE_SHELL=${AURYEA_USE_SHELL:-1}
+AURYEA_SHELL_NOPROFILE=${AURYEA_SHELL_NOPROFILE:-1}
+AURYEA_TMP_DIRECTORY=${AURYEA_TMP_DIRECTORY:-/tmp/auryea-${USER}/}
+MAKEPKG_OPTS=${MAKEPKG_OPTS:--i}
 
 BASEURL="http://aur.archlinux.org"
 RPCURL="${BASEURL}/rpc.php"
@@ -89,6 +91,28 @@ install () {
   local n="${2##*/}"
   tar xzf "$n"
   cd "${n%%.*}"
+  if [[ $AURYEA_USE_SHELL == 1 ]]; then
+    read -n1 -p "drop into $(basename $SHELL) for editing the PKGBUILD and what-not? [Y/n] "
+    echo
+    if [[ $REPLY == [Yy] ]]; then
+      echo "remember to exit once you're done!"
+      if [[ $AURYEA_SHELL_NOPROFILE == 1 ]]; then
+        case "$(basename $SHELL)" in
+          zsh)
+            (export PS1='[%1~]> '; $SHELL -f)
+            ;;
+          bash)
+            (export PS1='[\W]> '; $SHELL --noprofile --norc)
+            ;;
+          *)
+            $SHELL
+            ;;
+        esac
+      else
+        $SHELL
+      fi
+    fi
+  fi
   makepkg ${MAKEPKG_OPTS}
   if [[ $? -gt 0 ]]; then
     echo "error: makepkg failed - abort! abort!"
