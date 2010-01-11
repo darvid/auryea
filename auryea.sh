@@ -1,12 +1,21 @@
 #!/bin/bash
 
-[[ $UID == 0 ]] && echo "warning: running as root can kill kittens" >&2
-
 AURYEA_WRAP_PACMAN=${AURYEA_WRAP_PACMAN:-1}
 AURYEA_USE_SHELL=${AURYEA_USE_SHELL:-1}
 AURYEA_SHELL_NOPROFILE=${AURYEA_SHELL_NOPROFILE:-1}
 AURYEA_TMP_DIRECTORY=${AURYEA_TMP_DIRECTORY:-/tmp/auryea-${USER}/}
-MAKEPKG_OPTS=${MAKEPKG_OPTS:--i}
+MAKEPKG_OPTS=${MAKEPKG_OPTS:--si}
+
+AURYEA_COLOR_ENABLE=${AURYEA_COLOR_ENABLE:-1}
+AURYEA_COLOR_PACKAGE="\033[1;32m"
+AURYEA_COLOR_CATEGORY="\033[0;32m"
+AURYEA_COLOR_VERSION="\033[0;33m"
+AURYEA_COLOR_ERROR="\033[1;31m"
+
+if [[ $UID == 0 ]]; then
+  echo "warning: running as root can kill kittens" >&2
+  MAKEPKG_OPTS="${MAKEPKG_OPTS} --asroot"
+fi
 
 BASEURL="http://aur.archlinux.org"
 RPCURL="${BASEURL}/rpc.php"
@@ -76,23 +85,9 @@ sudo () {
   return $?
 }
 
-install () {
-  mkdir -p "$AURYEA_TMP_DIRECTORY/$1"
-  if [[ $? -gt 0 ]]; then
-    echo "error: unable to create temp directory" >&2
-    exit 1
-  fi
-  cd "$AURYEA_TMP_DIRECTORY/$1"
-  wget -nc "${BASEURL}/${2//\\}" 2> /dev/null
-  if [[ $? -gt 0 ]]; then
-    echo "error: wget borked (returned ${?})!" >&2
-    exit 1
-  fi
-  local n="${2##*/}"
-  tar xzf "$n"
-  cd "${n%%.*}"
+shell () {
   if [[ $AURYEA_USE_SHELL == 1 ]]; then
-    read -n1 -p "drop into $(basename $SHELL) for editing the PKGBUILD and what-not? [Y/n] "
+    read -n1 -p "${1:-drop into a shell? [Y/n]}"
     echo
     if [[ $REPLY == [Yy] ]]; then
       echo "remember to exit once you're done!"
@@ -113,9 +108,28 @@ install () {
       fi
     fi
   fi
+}
+
+install () {
+  mkdir -p "$AURYEA_TMP_DIRECTORY/$1"
+  if [[ $? -gt 0 ]]; then
+    error "unable to create temp directory"
+    exit 1
+  fi
+  cd "$AURYEA_TMP_DIRECTORY/$1"
+  wget -nc "${BASEURL}/${2//\\}" 2> /dev/null
+  if [[ $? -gt 0 ]]; then
+    error "wget borked (returned ${?})!"
+    exit 1
+  fi
+  local n="${2##*/}"
+  tar xzf "$n"
+  cd "${n%%.*}"
+  shell "drop into $(basename $SHELL) for editing the PKGBUILD and what-not? [Y/n]"
   makepkg ${MAKEPKG_OPTS}
   if [[ $? -gt 0 ]]; then
-    echo "error: makepkg failed - abort! abort!"
+    error "makepkg failed - abort! abort!"
+    shell "drop into $(basename $SHELL) again for troubleshooting? [Y/n]"
     exit 1
   fi
 }
@@ -124,7 +138,7 @@ aur () {
   o="$(wget -q -O- "${RPCURL}?type=${1}&arg=${2}")"
   [[ $? -gt 0 ]] && return $?
   if [[ $(gk "$o" "type") == 'error' ]]; then
-    echo "error: $(gk "$o" "results")"
+    error "$(gk "$o" "results")"
     return 9
   fi
   case "$1" in
@@ -135,6 +149,22 @@ aur () {
       vg -o "\"results\":\{.*\}" "$o" | cut -b12-
       ;;
   esac
+}
+
+print_pkg () {
+  mapfile -t arr <<< "$1"
+  [[ $AURYEA_COLOR_ENABLE -ne 1 ]] && unset AURYEA_COLOR_PACKAGE AURYEA_COLOR_CATEGORY
+  for ((i=0; i<"${#arr[@]}"; i++)); do
+    echo -en "${AURYEA_COLOR_CATEGORY}${CATEGORIES[$(gk "${arr[$i]}" CategoryID)]}\033[0m/"
+    echo -en "${AURYEA_COLOR_PACKAGE}$(gk "${arr[$i]}" Name)\033[0m "
+    echo -e "${AURYEA_COLOR_VERSION}$(gk "${arr[$i]}" Version)\033[0m"
+    echo -e "$(gk "${arr[$i]}" Description | fold -s | sed 's/\(.*\)/    \1/')"
+  done
+}
+
+error () {
+  [[ $AURYEA_COLOR_ENABLE -ne 1]] && unset AURYEA_COLOR_ERROR
+  echo "${AURYEA_COLOR_ERROR}error:\033[0m $*" >&2
 }
 
 main () {
@@ -214,7 +244,7 @@ main () {
         r=$(aur search "$2")
         case "$?" in
           10)
-            echo -e "\rinvalid operation" >&2
+            error "invalid operation"
             return $?
             ;;
           9)
@@ -227,19 +257,20 @@ main () {
             ;;
           0)
             echo
-            mapfile -t arr <<< "$r"
-            for ((i=0; i<"${#arr[@]}"; i++)); do
-              echo -n "${CATEGORIES[$(gk "${arr[$i]}" CategoryID)]}/"
-              echo "$(gk "${arr[$i]}" Name) $(gk "${arr[$i]}" Version)"
-              echo -e "$(gk "${arr[$i]}" Description | fold -s | sed 's/\(.*\)/    \1/')"
-            done
+            print_pkg "$r"
+            # mapfile -t arr <<< "$r"
+            # for ((i=0; i<"${#arr[@]}"; i++)); do
+            #  echo -n "${CATEGORIES[$(gk "${arr[$i]}" CategoryID)]}/"
+            #  echo "$(gk "${arr[$i]}" Name) $(gk "${arr[$i]}" Version)"
+            #  echo -e "$(gk "${arr[$i]}" Description | fold -s | sed 's/\(.*\)/    \1/')"
+            # done
             [[ $AURYEA_PACMAN_SEARCH == 1 ]] && pacman -Ss "$2"
             ;;
         esac
         ;;
       -u|--sysupgrade)
         if [[ $ACTION != "sync" ]]; then
-          echo "error: invalid/no operation specified" >&2
+          error "invalid/no operation specified"
           exit 1
         fi
         if [[ $AURYEA_WRAP_PACMAN == 1 ]]; then
