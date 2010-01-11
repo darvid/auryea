@@ -163,8 +163,8 @@ print_pkg () {
 }
 
 error () {
-  [[ $AURYEA_COLOR_ENABLE -ne 1]] && unset AURYEA_COLOR_ERROR
-  echo "${AURYEA_COLOR_ERROR}error:\033[0m $*" >&2
+  [[ $AURYEA_COLOR_ENABLE -ne 1 ]] && unset AURYEA_COLOR_ERROR
+  echo -e "${AURYEA_COLOR_ERROR}error:\033[0m $*" >&2
 }
 
 main () {
