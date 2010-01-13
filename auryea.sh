@@ -18,11 +18,6 @@ AURYEA_COLOR_VERSION="${AURYEA_COLOR_VERSION:-\033[0;33m}"
 AURYEA_COLOR_WARNING="${AURYEA_COLOR_WARNING:-\033[1;31m}"
 AURYEA_COLOR_ERROR="${AURYEA_COLOR_ERROR:-\033[0;31m}"
 
-if [[ $UID == 0 ]]; then
-  echo "warning: running as root can kill kittens" >&2
-  MAKEPKG_OPTS="${MAKEPKG_OPTS} --asroot"
-fi
-
 BASEURL="http://aur.archlinux.org"
 RPCURL="${BASEURL}/rpc.php"
 CATEGORIES=(
@@ -46,6 +41,21 @@ CATEGORIES=(
   [18]='xfce'
   [19]='kernels'
 )
+
+error () {
+  [[ $AURYEA_COLOR_ENABLE -ne 1 ]] && unset AURYEA_COLOR_ERROR
+  echo -e "${AURYEA_COLOR_ERROR}error:\033[0m $*" >&2
+}
+
+warning () {
+  [[ $AURYEA_COLOR_ENABLE -ne 1 ]] && unset AURYEA_COLOR_WARNING
+  echo -e "${AURYEA_COLOR_WARNING}warning:\033[0m $*" >&2
+}
+
+if [[ $UID == 0 ]]; then
+  warning "running as root can kill kittens"
+  MAKEPKG_OPTS="${MAKEPKG_OPTS} --asroot"
+fi
 
 usage () {
   if [[ $AURYEA_WRAP_PACMAN == 1 ]]; then
@@ -78,7 +88,10 @@ vg () {
 }
 
 sudo () {
-  [[ $UID == 0 ]] && return
+  if [[ $UID == 0 ]]; then
+    "$@"
+    return $?
+  fi
   if builtin type -P sudo &> /dev/null; then
     command sudo "$@"
   else
@@ -94,20 +107,10 @@ print_pkg () {
     echo -en "${AURYEA_COLOR_CATEGORY}${CATEGORIES[$(gk "${arr[$i]}" CategoryID)]}\033[0m/"
     echo -en "${AURYEA_COLOR_PACKAGE}$(gk "${arr[$i]}" Name)\033[0m "
     echo -e "${AURYEA_COLOR_VERSION}$(gk "${arr[$i]}" Version)\033[0m"
-    if [[ $ACTION == "search" && $AURYEA_COMPACT_SEARCH != 1 ]]; then
+    if [[ $ACTION == "search" && $AURYEA_COMPACT_SEARCH != 1 || $ACTION == "sync" ]]; then
       echo -e "$(gk "${arr[$i]}" Description | fold -s | sed 's/\(.*\)/    \1/')"
     fi
   done
-}
-
-error () {
-  [[ $AURYEA_COLOR_ENABLE -ne 1 ]] && unset AURYEA_COLOR_ERROR
-  echo -e "${AURYEA_COLOR_ERROR}error:\033[0m $*" >&2
-}
-
-warning () {
-  [[ $AURYEA_COLOR_ENABLE -ne 1 ]] && unset AURYEA_COLOR_WARNING
-  echo -e "${AURYEA_COLOR_WARNING}warning:\033[0m $*" >&2
 }
 
 shell () {
@@ -172,29 +175,29 @@ install () {
     exit 1
   fi
   cd "$AURYEA_TMP_DIRECTORY/$n"
-  wget -nc "${BASEURL}/${u//\\}" 2> /dev/null
+  wget -nc "${BASEURL}/${u//\\}" 2>/dev/null
   if [[ $? -gt 0 ]]; then
     error "wget borked (returned ${?})!"
-    exit 1
+    return 1
   fi
   local x="${u##*/}"
   tar xzf "$x"
   cd "${x%%.*}"
+  shell "drop into $(basename $SHELL) @ $PWD? [Y/n] "
   if [[ $AURYEA_PARSE_DEPENDS == 1 ]]; then
     unset depends
     . PKGBUILD
     if [[ "${#depends[@]}" -gt 0 ]]; then
       echo "resolving dependencies..."
       for p in "${depends[@]}"; do
-        sudo pacman -S "$p" --needed
+        sudo pacman -S "$p" --needed &> /dev/null
         if [[ $? != 0 ]]; then
           AURYEA_NO_REINSTALL=1 install "$p"
         fi
       done
     fi
   fi
-  shell "drop into $(basename $SHELL) for editing the PKGBUILD and what-not? [Y/n] "
-  o=$(makepkg ${MAKEPKG_OPTS})
+  makepkg ${MAKEPKG_OPTS}
   if [[ $? -gt 0 ]]; then
     error "makepkg failed - abort! abort!"
     shell "drop into $(basename $SHELL) again for troubleshooting? [Y/n] "
