@@ -1,16 +1,22 @@
 #!/bin/bash
 
+MAKEPKG_OPTS=${MAKEPKG_OPTS:--i}
+
 AURYEA_WRAP_PACMAN=${AURYEA_WRAP_PACMAN:-1}
 AURYEA_USE_SHELL=${AURYEA_USE_SHELL:-1}
 AURYEA_SHELL_NOPROFILE=${AURYEA_SHELL_NOPROFILE:-1}
 AURYEA_TMP_DIRECTORY=${AURYEA_TMP_DIRECTORY:-/tmp/auryea-${USER}/}
-MAKEPKG_OPTS=${MAKEPKG_OPTS:--si}
+AURYEA_PARSE_DEPENDS=${AURYEA_PARSE_DEPENDS:-1}
+AURYEA_NO_REINSTALL=${AURYEA_NO_REINSTALL:-0}
+AURYEA_VERBOSE_INSTALL=${AURYEA_VERBOSE_INSTALL:-1}
+AURYEA_COMPACT_SEARCH=${AURYEA_COMPACT_SEARCH:-0}
 
 AURYEA_COLOR_ENABLE=${AURYEA_COLOR_ENABLE:-1}
 AURYEA_COLOR_PACKAGE="${AURYEA_COLOR_PACKAGE:-\033[1;32m}"
 AURYEA_COLOR_CATEGORY="${AURYEA_COLOR_CATEGORY:-\033[0;32m}"
 AURYEA_COLOR_VERSION="${AURYEA_COLOR_VERSION:-\033[0;33m}"
-AURYEA_COLOR_ERROR="${AURYEA_COLOR_ERROR:-\033[1;31m}"
+AURYEA_COLOR_WARNING="${AURYEA_COLOR_WARNING:-\033[1;31m}"
+AURYEA_COLOR_ERROR="${AURYEA_COLOR_ERROR:-\033[0;31m}"
 
 if [[ $UID == 0 ]]; then
   echo "warning: running as root can kill kittens" >&2
@@ -62,12 +68,8 @@ version () {
 }
 
 gk () {
-  [[ "$#" == 1 ]] && local l=$(cat /dev/stdin)
-  local in="${l:-$1}"
-  local t1="${in##*${2:-$1}\":\"}"
+  local t1="${1#*${2}\":\"}"
   echo "${t1%%\"*}"
-  # vg -o "\"${2:-$1}\":\"[^\"]+\"" "${l:-$1}" | sed 's/"[^"]\+":"\([^"]\+\)"/\1/'
-  # return $?
 }
 
 vg () {
@@ -83,6 +85,29 @@ sudo () {
     su -c "$@"
   fi
   return $?
+}
+
+print_pkg () {
+  mapfile -t arr <<< "$1"
+  [[ $AURYEA_COLOR_ENABLE -ne 1 ]] && unset AURYEA_COLOR_PACKAGE AURYEA_COLOR_CATEGORY
+  for ((i=0; i<"${#arr[@]}"; i++)); do
+    echo -en "${AURYEA_COLOR_CATEGORY}${CATEGORIES[$(gk "${arr[$i]}" CategoryID)]}\033[0m/"
+    echo -en "${AURYEA_COLOR_PACKAGE}$(gk "${arr[$i]}" Name)\033[0m "
+    echo -e "${AURYEA_COLOR_VERSION}$(gk "${arr[$i]}" Version)\033[0m"
+    if [[ $ACTION == "search" && $AURYEA_COMPACT_SEARCH != 1 ]]; then
+      echo -e "$(gk "${arr[$i]}" Description | fold -s | sed 's/\(.*\)/    \1/')"
+    fi
+  done
+}
+
+error () {
+  [[ $AURYEA_COLOR_ENABLE -ne 1 ]] && unset AURYEA_COLOR_ERROR
+  echo -e "${AURYEA_COLOR_ERROR}error:\033[0m $*" >&2
+}
+
+warning () {
+  [[ $AURYEA_COLOR_ENABLE -ne 1 ]] && unset AURYEA_COLOR_WARNING
+  echo -e "${AURYEA_COLOR_WARNING}warning:\033[0m $*" >&2
 }
 
 shell () {
@@ -111,26 +136,68 @@ shell () {
 }
 
 install () {
-  mkdir -p "$AURYEA_TMP_DIRECTORY/$1"
+  local i o r
+  r=$(aur info "$1")
+  if [[ $? == 9 && $AURYEA_WRAP_PACMAN == 1 ]]; then
+    error "couldn't find package in AUR, falling back to pacman"
+    sudo pacman -S "$1"
+    exit $?
+  fi
+  i=$(pacman -Q "$1" 2> /dev/null)
+  if [[ $? != 0 ]]; then
+    echo "syncing \`$p'..."
+  else
+    local v1 v2 vc
+    v1=${i##* }
+    v2=$(gk "$r" Version)
+    vc=$(vercmp $v1 $v2)
+    if [[ $vc == 0 && $AURYEA_NO_REINSTALL != 1 ]]; then
+      warning "$i is up to date -- reinstalling"
+    elif [[ $vc == 0 && $AURYEA_NO_REINSTALL == 1 ]]; then
+      return
+    elif [[ $vc -gt 0 ]]; then
+      warning "$i is newer than AUR (${v2})"
+    elif [[ $vc -lt 0 ]]; then
+      echo "upgrading: $i -> ${v2}"
+    fi
+  fi
+  if [[ $AURYEA_VERBOSE_INSTALL == 1 ]]; then
+    print_pkg "$r"
+  fi
+  local n=$(gk "$r" Name)
+  local u=$(gk "$r" URLPath)
+  mkdir -p "$AURYEA_TMP_DIRECTORY/$n"
   if [[ $? -gt 0 ]]; then
     error "unable to create temp directory"
     exit 1
   fi
-  cd "$AURYEA_TMP_DIRECTORY/$1"
-  wget -nc "${BASEURL}/${2//\\}" 2> /dev/null
+  cd "$AURYEA_TMP_DIRECTORY/$n"
+  wget -nc "${BASEURL}/${u//\\}" 2> /dev/null
   if [[ $? -gt 0 ]]; then
     error "wget borked (returned ${?})!"
     exit 1
   fi
-  local n="${2##*/}"
-  tar xzf "$n"
-  cd "${n%%.*}"
-  shell "drop into $(basename $SHELL) for editing the PKGBUILD and what-not? [Y/n]"
-  makepkg ${MAKEPKG_OPTS}
+  local x="${u##*/}"
+  tar xzf "$x"
+  cd "${x%%.*}"
+  if [[ $AURYEA_PARSE_DEPENDS == 1 ]]; then
+    unset depends
+    . PKGBUILD
+    if [[ "${#depends[@]}" -gt 0 ]]; then
+      echo "resolving dependencies..."
+      for p in "${depends[@]}"; do
+        AURYEA_NO_REINSTALL=1 install "$p"
+      done
+    fi
+  fi
+  shell "drop into $(basename $SHELL) for editing the PKGBUILD and what-not? [Y/n] "
+  o=$(makepkg ${MAKEPKG_OPTS})
   if [[ $? -gt 0 ]]; then
     error "makepkg failed - abort! abort!"
-    shell "drop into $(basename $SHELL) again for troubleshooting? [Y/n]"
+    shell "drop into $(basename $SHELL) again for troubleshooting? [Y/n] "
     exit 1
+  else
+    echo "installed package \`${1}' at $(date)"
   fi
 }
 
@@ -149,22 +216,6 @@ aur () {
       vg -o "\"results\":\{.*\}" "$o" | cut -b12-
       ;;
   esac
-}
-
-print_pkg () {
-  mapfile -t arr <<< "$1"
-  [[ $AURYEA_COLOR_ENABLE -ne 1 ]] && unset AURYEA_COLOR_PACKAGE AURYEA_COLOR_CATEGORY
-  for ((i=0; i<"${#arr[@]}"; i++)); do
-    echo -en "${AURYEA_COLOR_CATEGORY}${CATEGORIES[$(gk "${arr[$i]}" CategoryID)]}\033[0m/"
-    echo -en "${AURYEA_COLOR_PACKAGE}$(gk "${arr[$i]}" Name)\033[0m "
-    echo -e "${AURYEA_COLOR_VERSION}$(gk "${arr[$i]}" Version)\033[0m"
-    echo -e "$(gk "${arr[$i]}" Description | fold -s | sed 's/\(.*\)/    \1/')"
-  done
-}
-
-error () {
-  [[ $AURYEA_COLOR_ENABLE -ne 1 ]] && unset AURYEA_COLOR_ERROR
-  echo -e "${AURYEA_COLOR_ERROR}error:\033[0m $*" >&2
 }
 
 main () {
@@ -258,12 +309,6 @@ main () {
           0)
             echo
             print_pkg "$r"
-            # mapfile -t arr <<< "$r"
-            # for ((i=0; i<"${#arr[@]}"; i++)); do
-            #  echo -n "${CATEGORIES[$(gk "${arr[$i]}" CategoryID)]}/"
-            #  echo "$(gk "${arr[$i]}" Name) $(gk "${arr[$i]}" Version)"
-            #  echo -e "$(gk "${arr[$i]}" Description | fold -s | sed 's/\(.*\)/    \1/')"
-            # done
             [[ $AURYEA_PACMAN_SEARCH == 1 ]] && pacman -Ss "$2"
             ;;
         esac
@@ -295,7 +340,7 @@ main () {
           if [[ $vc == 0 ]]; then
             continue
           elif [[ $vc == 1 ]]; then
-            echo "warning: $p: local (${p##* }) is newer than AUR ($pv)" >&2
+            warning "$p: local (${p##* }) is newer than AUR ($pv)"
           else
             echo " * ${CATEGORIES[$(gk "$ip" CategoryID)]}/${p%% *} (${p##* } -> $pv)"
             ap+=( "${p%% *}" "$pv" "$(gk "$ip" URLPath)")
@@ -313,30 +358,7 @@ main () {
       --)
         if [[ "$ACTION" == "sync" ]]; then
           for p in "${@:2:$#}"; do
-            [[ $p == "--" ]] && continue
-            r=$(aur info "$p")
-            if [[ $? == 9 && $AURYEA_WRAP_PACMAN == 1 ]]; then
-              echo "couldn't find package in AUR, falling back to pacman" >&2
-              sudo pacman -S "$p"
-              exit $?
-            fi
-            i=$(pacman -Q "$p" 2> /dev/null)
-            if [[ $? != 0 ]]; then
-              echo "syncing \`$p'..."
-            else
-              local v1 v2 vc
-              v1=${i##* }
-              v2=$(gk "$r" Version)
-              vc=$(vercmp $v1 $v2)
-              if [[ $vc == 0 ]]; then
-                echo "warning: $i is up to date -- reinstalling" >&2
-              elif [[ $vc -gt 0 ]]; then
-                echo "warning: $i is newer than AUR (${v2})" >&2
-              elif [[ $vc -lt 0 ]]; then
-                echo "upgrading: $i -> ${v2}"
-              fi
-            fi
-            install "$(gk "$r" Name)" "$(gk "$r" URLPath)"
+            install "$p"
           done
         fi
         shift
