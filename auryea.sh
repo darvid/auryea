@@ -186,7 +186,10 @@ install () {
     if [[ "${#depends[@]}" -gt 0 ]]; then
       echo "resolving dependencies..."
       for p in "${depends[@]}"; do
-        AURYEA_NO_REINSTALL=1 install "$p"
+        sudo pacman -S "$p" --needed
+        if [[ $? != 0 ]]; then
+          AURYEA_NO_REINSTALL=1 install "$p"
+        fi
       done
     fi
   fi
