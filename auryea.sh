@@ -1,22 +1,30 @@
 #!/bin/bash
 
-MAKEPKG_OPTS=${MAKEPKG_OPTS:--i}
+setenv () {
+  if [[ -n $1 ]]; then
+    read -r $1 <<< "$2"
+    export $1
+  fi
+}
 
-AURYEA_WRAP_PACMAN=${AURYEA_WRAP_PACMAN:-1}
-AURYEA_USE_SHELL=${AURYEA_USE_SHELL:-1}
-AURYEA_SHELL_NOPROFILE=${AURYEA_SHELL_NOPROFILE:-1}
-AURYEA_TMP_DIRECTORY=${AURYEA_TMP_DIRECTORY:-/tmp/auryea-${USER}/}
-AURYEA_PARSE_DEPENDS=${AURYEA_PARSE_DEPENDS:-1}
-AURYEA_NO_REINSTALL=${AURYEA_NO_REINSTALL:-0}
-AURYEA_VERBOSE_INSTALL=${AURYEA_VERBOSE_INSTALL:-1}
-AURYEA_COMPACT_SEARCH=${AURYEA_COMPACT_SEARCH:-0}
+setenv MAKEPKG_OPTS 1
+setenv AURYEA_WRAP_PACMAN 1
+setenv AURYEA_PACMAN_SEARCH 1
+setenv AURYEA_USE_SHELL 1
+setenv AURYEA_SHELL_NOPROFILE 1
+setenv AURYEA_TMP_DIRECTORY "/tmp/auryea-${USER}/"
+setenv AURYEA_PARSE_DEPENDS 1
+setenv AURYEA_NO_REINSTALL 0
+setenv AURYEA_VERBOSE_INSTALL 1
+setenv AURYEA_COMPACT_SEARCH 0
 
-AURYEA_COLOR_ENABLE=${AURYEA_COLOR_ENABLE:-1}
-AURYEA_COLOR_PACKAGE="${AURYEA_COLOR_PACKAGE:-\033[1;32m}"
-AURYEA_COLOR_CATEGORY="${AURYEA_COLOR_CATEGORY:-\033[0;32m}"
-AURYEA_COLOR_VERSION="${AURYEA_COLOR_VERSION:-\033[0;33m}"
-AURYEA_COLOR_WARNING="${AURYEA_COLOR_WARNING:-\033[1;31m}"
-AURYEA_COLOR_ERROR="${AURYEA_COLOR_ERROR:-\033[0;31m}"
+setenv AURYEA_COLOR_ENABLE 1
+setenv AURYEA_COLOR_PACKAGE "\033[1;32m"
+setenv AURYEA_COLOR_CATEGORY "\033[0;32m"
+setenv AURYEA_COLOR_VERSION "\033[0;33m"
+setenv AURYEA_COLOR_WARNING "\033[1;31m"
+setenv AURYEA_COLOR_ERROR "\033[0;31m"
+
 
 BASEURL="http://aur.archlinux.org"
 RPCURL="${BASEURL}/rpc.php"
@@ -50,6 +58,12 @@ error () {
 warning () {
   [[ $AURYEA_COLOR_ENABLE -ne 1 ]] && unset AURYEA_COLOR_WARNING
   echo -e "${AURYEA_COLOR_WARNING}warning:\033[0m $*" >&2
+}
+
+sigint () {
+  echo
+  error "user aborted"
+  exit 1
 }
 
 if [[ $UID == 0 ]]; then
@@ -102,10 +116,16 @@ sudo () {
 
 print_pkg () {
   mapfile -t arr <<< "$1"
-  [[ $AURYEA_COLOR_ENABLE -ne 1 ]] && unset AURYEA_COLOR_PACKAGE AURYEA_COLOR_CATEGORY
   for ((i=0; i<"${#arr[@]}"; i++)); do
-    echo -en "${AURYEA_COLOR_CATEGORY}${CATEGORIES[$(gk "${arr[$i]}" CategoryID)]}\033[0m/"
-    echo -en "${AURYEA_COLOR_PACKAGE}$(gk "${arr[$i]}" Name)\033[0m "
+    local category="${CATEGORIES[$(gk "${arr[$i]}" CategoryID)]}"
+    local name="$(gk "${arr[$i]}" Name)"
+    # TODO: permanent fix for JSON collections that span multiple lines
+    # f.ex, see the output of http://aur.archlinux.org/rpc.php?type=search&arg=goggles
+    if [[ -z $name || -z $category ]]; then
+      continue
+    fi
+    echo -en "${AURYEA_COLOR_CATEGORY}${category}\033[0m/"
+    echo -en "${AURYEA_COLOR_PACKAGE}${name}\033[0m "
     echo -e "${AURYEA_COLOR_VERSION}$(gk "${arr[$i]}" Version)\033[0m"
     if [[ $ACTION == "search" && $AURYEA_COMPACT_SEARCH != 1 || $ACTION == "sync" ]]; then
       echo -e "$(gk "${arr[$i]}" Description | fold -s | sed 's/\(.*\)/    \1/')"
@@ -188,11 +208,17 @@ install () {
     unset depends
     . PKGBUILD
     if [[ "${#depends[@]}" -gt 0 ]]; then
-      echo "resolving dependencies..."
+      echo "parsing dependencies..."
       for p in "${depends[@]}"; do
-        sudo pacman -S "$p" --needed &> /dev/null
-        if [[ $? != 0 ]]; then
-          AURYEA_NO_REINSTALL=1 install "$p"
+        if ! pacman -T "$p" &> /dev/null; then
+          echo -n "resolving dependency: $p"
+          if pacman -Si "${p%%[<>=]*}" &> /dev/null; then
+            echo " (pacman)"
+            sudo pacman -S "$p"
+          else
+            echo " (auryea)"
+            AURYEA_NO_REINSTALL=1 install "$p"
+          fi
         fi
       done
     fi
@@ -211,12 +237,12 @@ aur () {
   o="$(wget -q -O- "${RPCURL}?type=${1}&arg=${2}")"
   [[ $? -gt 0 ]] && return $?
   if [[ $(gk "$o" "type") == 'error' ]]; then
-    error "$(gk "$o" "results")"
+    # error "$(gk "$o" "results")"
     return 9
   fi
   case "$1" in
     search|msearch)
-      vg -o "\"results\":\[\{.*\}\]" "$o" | egrep -o '\{("[^"]+":"[^"]+",?)+\}'
+      vg -o "\"results\":\[\{.*\}\]" "$o" | egrep -o '("[^"]+":"[^"]+",?)+'
       ;;
     info)
       vg -o "\"results\":\{.*\}" "$o" | cut -b12-
@@ -225,7 +251,7 @@ aur () {
 }
 
 main () {
-  local a i r so lo ao
+  local a i r rv so lo ao
   [[ -z "$1" ]] && usage
   so="VQRSUcdeghiklmo:p:s:tuqvr:b:nfwy"
   lo="changelog,deps,explicit,groups,info,check,list,foreign,owns:,file:,search:,\
@@ -299,18 +325,19 @@ main () {
         ACTION=search
         echo -n "searching AUR..."
         r=$(aur search "$2")
-        case "$?" in
+        rv=$?
+        case "$rv" in
           10)
             error "invalid operation"
-            return $?
+            return $rv
             ;;
           9)
             echo -e "\r:: $r"
-            return $?
+            return $rv
             ;;
           [1-8])
             echo -e "\rwget failed. see \`man wget'" >&2
-            return $?
+            return $rv
             ;;
           0)
             echo
@@ -378,4 +405,5 @@ main () {
   done
 }
 
+trap sigint SIGINT
 main "$@"
