@@ -274,9 +274,8 @@ main () {
         version
         ;;
       -Q|-R|-U)
-        shift
         if [[ $AURYEA_WRAP_PACMAN == 1 ]]; then
-          pacman -Q "$ao" "$@"
+          pacman "$ao" "$@"
           exit $?
         else
           exit
