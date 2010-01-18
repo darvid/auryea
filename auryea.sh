@@ -273,13 +273,17 @@ main () {
         [[ $AURYEA_WRAP_PACMAN == 1 ]] && pacman --version; echo -e '---\n'
         version
         ;;
-      -Q|-R|-U)
-        if [[ $AURYEA_WRAP_PACMAN == 1 ]]; then
-          pacman "$ao" "$@"
-          exit $?
-        else
-          exit
-        fi
+      -Q|--query)
+        ACTION=query
+        ao+="$1 "
+        ;;
+      -R|--remove)
+        ACTION=remove
+        ao+="$1 "
+        ;;
+      -U|--upgrade)
+        ACTION=upgrade
+        ao+="$1 "
         ;;
       -S)
         ACTION=sync
@@ -390,12 +394,18 @@ main () {
         unset ip ap v2 vc
         ;;
       --)
-        if [[ "$ACTION" == "sync" ]]; then
-          for p in "${@:2:$#}"; do
-            install "$p"
-          done
-        fi
         shift
+        case "$ACTION" in
+          sync)
+            for p in "$@"; do
+              install "$p"
+            done
+            ;;
+          *)
+            [[ $AURYEA_WRAP_PACMAN == 1 ]] && sudo pacman $ao $@
+            # TODO: handle replacing packages
+            ;;
+        esac
         break
         ;;
       -*)
