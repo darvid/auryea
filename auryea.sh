@@ -7,7 +7,7 @@ setenv () {
   fi
 }
 
-setenv MAKEPKG_OPTS 1
+setenv MAKEPKG_OPTS "-i"
 setenv AURYEA_WRAP_PACMAN 1
 setenv AURYEA_PACMAN_SEARCH 1
 setenv AURYEA_USE_SHELL 1
@@ -238,6 +238,7 @@ aur () {
   [[ $? -gt 0 ]] && return $?
   if [[ $(gk "$o" "type") == 'error' ]]; then
     # error "$(gk "$o" "results")"
+    echo "$(gk "$o" "results")"
     return 9
   fi
   case "$1" in
@@ -332,7 +333,8 @@ main () {
             return $rv
             ;;
           9)
-            echo -e "\r:: $r"
+            echo -ne "\r"
+            error "$r"
             return $rv
             ;;
           [1-8])
