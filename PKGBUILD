@@ -2,7 +2,7 @@
 
 name=auryea
 pkgname="${name}-hg"
-pkgver=10
+pkgver=13
 pkgrel=1
 source=()
 md5sums=()
@@ -28,6 +28,5 @@ build () {
     hg clone "${_hgroot}/${_hgrepo}"
   fi
   cd "${_hgrepo}"
-  mv "${name}.sh" "$name"
-  install -D -m755 "$name" "${pkgdir}/usr/bin/${name}"
+  install -D -m755 "${name}.sh" "${pkgdir}/usr/bin/$name"
 }

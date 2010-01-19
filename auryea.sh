@@ -1,7 +1,7 @@
 #!/bin/bash
 
 setenv () {
-  if [[ -n $1 ]]; then
+  if [[ ! ${!1} ]]; then
     read -r $1 <<< "$2"
     export $1
   fi
@@ -24,7 +24,6 @@ setenv AURYEA_COLOR_CATEGORY "\033[0;32m"
 setenv AURYEA_COLOR_VERSION "\033[0;33m"
 setenv AURYEA_COLOR_WARNING "\033[1;31m"
 setenv AURYEA_COLOR_ERROR "\033[0;31m"
-
 
 BASEURL="http://aur.archlinux.org"
 RPCURL="${BASEURL}/rpc.php"
@@ -94,11 +93,6 @@ version () {
 gk () {
   local t1="${1#*${2}\":\"}"
   echo "${t1%%\"*}"
-}
-
-vg () {
-  egrep ${@:1:$((${#@}-1))} <<< "${@:(-1)}"
-  return $?
 }
 
 sudo () {
@@ -243,10 +237,10 @@ aur () {
   fi
   case "$1" in
     search|msearch)
-      vg -o "\"results\":\[\{.*\}\]" "$o" | egrep -o '("[^"]+":"[^"]+",?)+'
+      egrep -o "\"results\":\[\{.*\}\]" <<< "$o" | egrep -o '("[^"]+":"[^"]+",?)+'
       ;;
     info)
-      vg -o "\"results\":\{.*\}" "$o" | cut -b12-
+      egrep -o "\"results\":\{.*\}" <<< "$o" | cut -b12-
       ;;
   esac
 }
