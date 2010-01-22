@@ -1,7 +1,7 @@
 #!/bin/bash
 
 setenv () {
-  if [[ ! ${!1} ]]; then
+  if [[ -z "${!1}" ]]; then
     read -r $1 <<< "$2"
     export $1
   fi
@@ -19,11 +19,13 @@ setenv AURYEA_VERBOSE_INSTALL 1
 setenv AURYEA_COMPACT_SEARCH 0
 
 setenv AURYEA_COLOR_ENABLE 1
-setenv AURYEA_COLOR_PACKAGE "\033[1;32m"
-setenv AURYEA_COLOR_CATEGORY "\033[0;32m"
-setenv AURYEA_COLOR_VERSION "\033[0;33m"
-setenv AURYEA_COLOR_WARNING "\033[1;31m"
-setenv AURYEA_COLOR_ERROR "\033[0;31m"
+if [[ $AURYEA_COLOR_ENABLE == 1 ]]; then
+  setenv AURYEA_COLOR_PACKAGE "\033[1;32m"
+  setenv AURYEA_COLOR_CATEGORY "\033[0;32m"
+  setenv AURYEA_COLOR_VERSION "\033[0;33m"
+  setenv AURYEA_COLOR_WARNING "\033[1;31m"
+  setenv AURYEA_COLOR_ERROR "\033[0;31m"
+fi
 
 BASEURL="http://aur.archlinux.org"
 RPCURL="${BASEURL}/rpc.php"
@@ -50,12 +52,10 @@ CATEGORIES=(
 )
 
 error () {
-  [[ $AURYEA_COLOR_ENABLE -ne 1 ]] && unset AURYEA_COLOR_ERROR
   echo -e "${AURYEA_COLOR_ERROR}error:\033[0m $*" >&2
 }
 
 warning () {
-  [[ $AURYEA_COLOR_ENABLE -ne 1 ]] && unset AURYEA_COLOR_WARNING
   echo -e "${AURYEA_COLOR_WARNING}warning:\033[0m $*" >&2
 }
 
@@ -115,9 +115,7 @@ print_pkg () {
     local name="$(gk "${arr[$i]}" Name)"
     # TODO: permanent fix for JSON collections that span multiple lines
     # f.ex, see the output of http://aur.archlinux.org/rpc.php?type=search&arg=goggles
-    if [[ -z $name || -z $category ]]; then
-      continue
-    fi
+    [[ -z $name || -z $category ]] && continue
     echo -en "${AURYEA_COLOR_CATEGORY}${category}\033[0m/"
     echo -en "${AURYEA_COLOR_PACKAGE}${name}\033[0m "
     echo -e "${AURYEA_COLOR_VERSION}$(gk "${arr[$i]}" Version)\033[0m"
@@ -217,7 +215,8 @@ install () {
       done
     fi
   fi
-  makepkg ${MAKEPKG_OPTS}
+  echo $MAKEPKG_OPTS
+  makepkg $MAKEPKG_OPTS
   if [[ $? -gt 0 ]]; then
     error "makepkg failed - abort! abort!"
     shell "drop into $(basename $SHELL) again for troubleshooting? [Y/n] "
@@ -346,15 +345,16 @@ main () {
         esac
         ;;
       -u|--sysupgrade)
+        local rv
         if [[ $ACTION != "sync" ]]; then
           error "invalid/no operation specified"
           exit 1
         fi
         if [[ $AURYEA_WRAP_PACMAN == 1 ]]; then
           shift
-          sudo pacman -Su "$ao" "${@:2:$#}"
-          echo
-          if [[ $? -gt 0 ]]; then
+          sudo pacman -Su $ao ${@:2:$#}
+          rv=$?
+          if [[ $rv -gt 0 ]]; then
             local rv=$?
             read -n1 -p "pacman borked. really attempt to upgrade AUR packages? (!recommended) [Y/n]"
             [[ $REPLY != [Yy] ]] && exit $rv
@@ -372,12 +372,15 @@ main () {
           if [[ $vc == 0 ]]; then
             continue
           elif [[ $vc == 1 ]]; then
-            warning "$p: local (${p##* }) is newer than AUR ($pv)"
+            warning "${AURYEA_COLOR_PACKAGE}$p\033[0m: local (${AURYEA_COLOR_VERSION}${p##* }\033[0m) is newer than AUR (${AURYEA_COLOR_VERSION}$pv\033[0m)"
           else
-            echo " * ${CATEGORIES[$(gk "$ip" CategoryID)]}/${p%% *} (${p##* } -> $pv)"
+            echo -en " * ${AURYEA_COLOR_CATEGORY}${CATEGORIES[$(gk "$ip" CategoryID)]}\033[0m"
+            echo -en "/${AURYEA_COLOR_PACKAGE}${p%% *}\033[0m"
+            echo -e "(${AURYEA_COLOR_VERSION}${p##* }\033[0m -> ${AURYEA_COLOR_VERSION}$pv\033[0m)"
             ap+=( "${p%% *}" "$pv" "$(gk "$ip" URLPath)")
           fi
         done
+        unset IFS
         read -n1 -p "upgrade these packages? [Y/n] "
         [[ $REPLY != [Yy] ]] && exit
         echo
