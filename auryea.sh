@@ -143,7 +143,7 @@ print_pkg () {
     echo -en "$(color cat $category)/$(color pkg $name) $(color ver $(gk "${arr[$i]}" Version))"
     if [[ $ACTION == "search" && $AURYEA_COMPACT_SEARCH != 1 || $ACTION == "sync" ]]; then
       echo
-      echo -e "$(gk "${arr[$i]}" Description | fold -s | sed 's/\(.*\)/    \1/')"
+      echo -e "$(gk "${arr[$i]}" Description | fold -s -w$(($(tput cols)-4)) | sed 's/\(.*\)/    \1/')"
     fi
   done
 }
