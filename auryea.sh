@@ -12,20 +12,18 @@ setenv AURYEA_WRAP_PACMAN 1
 setenv AURYEA_PACMAN_SEARCH 1
 setenv AURYEA_USE_SHELL 1
 setenv AURYEA_SHELL_NOPROFILE 1
-setenv AURYEA_TMP_DIRECTORY "/tmp/auryea-${USER}/"
+setenv AURYEA_TMP_DIRECTORY "/tmp/auryea-${USER}"
 setenv AURYEA_PARSE_DEPENDS 1
 setenv AURYEA_NO_REINSTALL 0
 setenv AURYEA_VERBOSE_INSTALL 1
 setenv AURYEA_COMPACT_SEARCH 0
 
 setenv AURYEA_COLOR_ENABLE 1
-if [[ $AURYEA_COLOR_ENABLE == 1 ]]; then
-  setenv AURYEA_COLOR_PACKAGE "\033[1;32m"
-  setenv AURYEA_COLOR_CATEGORY "\033[0;32m"
-  setenv AURYEA_COLOR_VERSION "\033[0;33m"
-  setenv AURYEA_COLOR_WARNING "\033[1;31m"
-  setenv AURYEA_COLOR_ERROR "\033[0;31m"
-fi
+setenv AURYEA_COLOR_PACKAGE "\033[1m"
+setenv AURYEA_COLOR_CATEGORY "\033[1;35m"
+setenv AURYEA_COLOR_VERSION "\033[1;32m"
+setenv AURYEA_COLOR_WARNING "\033[1;31m"
+setenv AURYEA_COLOR_ERROR "\033[0;31m"
 
 BASEURL="http://aur.archlinux.org"
 RPCURL="${BASEURL}/rpc.php"
@@ -70,6 +68,24 @@ if [[ $UID == 0 ]]; then
   MAKEPKG_OPTS="${MAKEPKG_OPTS} --asroot"
 fi
 
+color () {
+  if [[ $AURYEA_COLOR_ENABLE == 1 ]]; then
+    case "$1" in
+      pkg|package)
+        echo -ne "${AURYEA_COLOR_PACKAGE}"
+        ;;
+      ver|version)
+        echo -ne "${AURYEA_COLOR_VERSION}"
+        ;;
+      cat|category)
+        echo -ne "${AURYEA_COLOR_CATEGORY}"
+        ;;
+    esac
+    local e="\033[0m"
+  fi
+  echo -ne "${2}${e}"
+}
+
 usage () {
   if [[ $AURYEA_WRAP_PACMAN == 1 ]]; then
     pacman --help "$@" | sed 's/pacman/auryea/'
@@ -80,7 +96,7 @@ usage () {
 }
 
 version () {
-  echo "auryea v0.0.001"
+  echo "auryea v0.5"
   echo "Copyright (c) 2009 David 'dav' Gidwani"
   echo
   echo "This program is free software: you can redistribute it and/or modify"
@@ -101,11 +117,19 @@ sudo () {
     return $?
   fi
   if builtin type -P sudo &> /dev/null; then
-    command sudo "$@"
+    command sudo $@
   else
-    su -c "$@"
+    su -c $@
   fi
   return $?
+}
+
+pacman () {
+  if builtin type -P pacman-color &> /dev/null; then
+    pacman-color $@
+  else
+    pacman $@
+  fi
 }
 
 print_pkg () {
@@ -116,10 +140,9 @@ print_pkg () {
     # TODO: permanent fix for JSON collections that span multiple lines
     # f.ex, see the output of http://aur.archlinux.org/rpc.php?type=search&arg=goggles
     [[ -z $name || -z $category ]] && continue
-    echo -en "${AURYEA_COLOR_CATEGORY}${category}\033[0m/"
-    echo -en "${AURYEA_COLOR_PACKAGE}${name}\033[0m "
-    echo -e "${AURYEA_COLOR_VERSION}$(gk "${arr[$i]}" Version)\033[0m"
+    echo -en "$(color cat $category)/$(color pkg $name) $(color ver $(gk "${arr[$i]}" Version))"
     if [[ $ACTION == "search" && $AURYEA_COMPACT_SEARCH != 1 || $ACTION == "sync" ]]; then
+      echo
       echo -e "$(gk "${arr[$i]}" Description | fold -s | sed 's/\(.*\)/    \1/')"
     fi
   done
@@ -150,11 +173,124 @@ shell () {
   fi
 }
 
+clean () {
+  case "$1" in
+    outdated)
+      local d pkgs v1 v2 vc
+      echo "cache directory: ${AURYEA_TMP_DIRECTORY}"
+      read -n1 -p "really remove outdated packages? [Y/n] "
+      echo
+      if [[ $REPLY == [yY] ]]; then
+        for p in ${AURYEA_TMP_DIRECTORY}/*; do
+          [[ ! -d "$p/${p##*/}" ]] && { d=1; continue; }
+          v1=$(pacman -Q "${p##*/}" 2> /dev/null)
+          cd "$p/${p##*/}"
+          pkgs=$(ls *.pkg.tar.gz 2> /dev/null)
+          if [[ $? == 0 ]]; then
+            for f in "$pkgs"; do
+              tar xf "$f" .PKGINFO 2> /dev/null
+              [[ $? -gt 0 ]] && continue
+              v2=$(grep pkgver .PKGINFO)
+              vc=$(vercmp "${v1##* }" "${v2##*= }")
+              [[ $vc -ge 0 ]] && d=1
+            done
+          else
+            d=1
+          fi
+          [[ $d == 1 ]] && rm -rf "$p"
+        done
+      fi
+      [[ $AURYEA_WRAP_PACMAN == 1 ]] && sudo pacman -Sc
+      ;;
+    all)
+      echo "cache directory: ${AURYEA_TMP_DIRECTORY}"
+      read -n1 -p "really really REALLY rm -rf it? cannot be undone, kills kittens, etc etc"
+      echo
+      if [[ $REPLY == [yY] ]]; then
+        rm -rf "${AURYEA_TMP_DIRECTORY}"
+      fi
+      [[ $AURYEA_WRAP_PACMAN == 1 ]] && sudo pacman -Scc
+      ;;
+  esac
+}
+
+search () {
+  local r rv
+  echo -n "searching AUR..."
+  r=$(aur search "$1")
+  rv=$?
+  case "$rv" in
+    10)
+      error "invalid operation"
+      return $rv
+      ;;
+    9)
+      echo -ne "\r"
+      error "$r"
+      return $rv
+      ;;
+    [1-8])
+      echo -e "\rwget failed. see \`man wget'" >&2
+      return $rv
+      ;;
+    0)
+      echo
+      print_pkg "$r"
+      [[ $AURYEA_PACMAN_SEARCH == 1 ]] && pacman -Ss "$1"
+      ;;
+  esac
+}
+
+upgrade () {
+  local rv ip ap pv lv vc
+  if [[ $ACTION != "sync" ]]; then
+    error "invalid/no operation specified"
+    exit 1
+  fi
+  if [[ $AURYEA_WRAP_PACMAN == 1 ]]; then
+    shift
+    sudo pacman -Su $ao ${@:2:$#}
+    rv=$?
+    if [[ $rv -gt 0 ]]; then
+      local rv=$?
+      read -n1 -p "pacman borked. really attempt to upgrade AUR packages? (!recommended) [Y/n]"
+      [[ $REPLY != [Yy] ]] && exit $rv
+    fi
+  fi
+  echo "checking AUR for updates...this could take a while"
+  IFS=$'\n'
+  ap=( )
+  for p in $(pacman -Qme); do
+    ip="$(aur info ${p%% *})"
+    [[ $? -gt 0 ]] && continue
+    lv="${p##* }"
+    pv=$(gk "$ip" Version)
+    vc=$(vercmp $lv $pv)
+    if [[ $vc == 0 ]]; then
+      continue
+    elif [[ $vc == 1 ]]; then
+      warning "$(color pkg $p): local ($(color ver $lv)) is newer than AUR ($(color ver $pv))"
+    else
+      echo -en " * $(color cat ${CATEGORIES[$(gk "$ip" CategoryID)]})"
+      echo -e "/$(color pkg ${p%% *}) ($(color ver $lv) -> $(color ver $pv))"
+      ap+=( "${p%% *}" "$pv" "$(gk "$ip" URLPath)")
+    fi
+  done
+  unset IFS
+  read -n1 -p "upgrade these packages? [Y/n] "
+  [[ $REPLY != [Yy] ]] && exit
+  echo
+  for ((i=0; i<${#ap[@]}; i=i+3)); do
+    install "${ap[$i]}" "${ap[$((i+2))]}"
+  done
+  unset ip ap v2 vc
+}
+
 install () {
   local i o r
   r=$(aur info "$1")
   if [[ $? == 9 && $AURYEA_WRAP_PACMAN == 1 ]]; then
-    error "couldn't find package in AUR, falling back to pacman"
+    error "couldn't find package '${1}' in AUR, falling back to pacman"
     sudo pacman -S "$1"
     exit $?
   fi
@@ -167,13 +303,13 @@ install () {
     v2=$(gk "$r" Version)
     vc=$(vercmp $v1 $v2)
     if [[ $vc == 0 && $AURYEA_NO_REINSTALL != 1 ]]; then
-      warning "$i is up to date -- reinstalling"
+      warning "$(color pkg $i) is up to date -- reinstalling"
     elif [[ $vc == 0 && $AURYEA_NO_REINSTALL == 1 ]]; then
       return
     elif [[ $vc -gt 0 ]]; then
-      warning "$i is newer than AUR (${v2})"
+      warning "$(color pkg $i) ($(color ver $v1)) is newer than AUR ($(color ver $v2))"
     elif [[ $vc -lt 0 ]]; then
-      echo "upgrading: $i -> ${v2}"
+      echo "upgrading: $(color pkg $i) $(color ver $v1) -> $(color ver $v2)"
     fi
   fi
   if [[ $AURYEA_VERBOSE_INSTALL == 1 ]]; then
@@ -181,7 +317,7 @@ install () {
   fi
   local n=$(gk "$r" Name)
   local u=$(gk "$r" URLPath)
-  mkdir -p "$AURYEA_TMP_DIRECTORY/$n"
+  mkdir -p "$AURYEA_TMP_DIRECTORY/$n" &> /dev/null
   if [[ $? -gt 0 ]]; then
     error "unable to create temp directory"
     exit 1
@@ -215,11 +351,11 @@ install () {
       done
     fi
   fi
-  echo $MAKEPKG_OPTS
   makepkg $MAKEPKG_OPTS
   if [[ $? -gt 0 ]]; then
     error "makepkg failed - abort! abort!"
     shell "drop into $(basename $SHELL) again for troubleshooting? [Y/n] "
+    # TODO: prompt and attempt to rebuild the package
     exit 1
   else
     echo "installed package \`${1}' at $(date)"
@@ -245,7 +381,7 @@ aur () {
 }
 
 main () {
-  local a i r rv so lo ao
+  local so lo
   [[ -z "$1" ]] && usage
   so="VQRSUcdeghiklmo:p:s:tuqvr:b:nfwy"
   lo="changelog,deps,explicit,groups,info,check,list,foreign,owns:,file:,search:,\
@@ -255,158 +391,112 @@ main () {
   dbonly,nosave,recursive,unneeded,help,version"
   if grep -q 'S' <<< "$@"; then
     lo=$(sed 's/list/list:/' <<< "$lo")
+  elif grep -q 'R' <<< "$@"; then
+    so=$(sed 's/s:/s/' <<< "$so")
   fi
-  set -- $(getopt -u -n$0 -o"$so" -l"$lo" -- "$@")
-  while [[ $# -gt 1 ]]; do
+  set -- $(getopt -u -n$(basename $0) -o"$so" -l"$lo" -- "$@")
+  while [[ $# -gt 0 ]]; do
     case "$1" in
-      -h|--help)
-        usage "$@"
-        ;;
       -V|--version)
         [[ $AURYEA_WRAP_PACMAN == 1 ]] && pacman --version; echo -e '---\n'
         version
+        exit
         ;;
       -Q|--query)
+        [[ -n $ACTION ]] && error "only one operation may be used at a time"
         ACTION=query
-        ao+="$1 "
+        UNHANDLED+="$1 "
         ;;
       -R|--remove)
+        [[ $ACTION ]] && error "only one operation may be used at a time"
         ACTION=remove
-        ao+="$1 "
+        UNHANDLED+="$1 "
         ;;
       -U|--upgrade)
+        [[ $ACTION ]] && error "only one operation may be used at a time"
         ACTION=upgrade
-        ao+="$1 "
+        UNHANDLED+="$1 "
         ;;
-      -S)
+      -S|--sync)
+        [[ $ACTION ]] && error "only one operation may be used at a time"
         ACTION=sync
         ;;
       -c|--clean)
-        local d pkgs v1 v2 vc
-        echo "cache directory: ${AURYEA_TMP_DIRECTORY}"
-        read -n1 -p "really remove outdated packages? [Y/n] "
-        echo
-        if [[ $REPLY == [yY] ]]; then
-          for p in ${AURYEA_TMP_DIRECTORY}/*; do
-            [[ ! -d "$p/${p##*/}" ]] && { d=1; continue; }
-            v1=$(pacman -Q "${p##*/}" 2> /dev/null)
-            cd "$p/${p##*/}"
-            pkgs=$(ls *.pkg.tar.gz 2> /dev/null)
-            if [[ $? == 0 ]]; then
-              for f in "$pkgs"; do
-                tar xf "$f" .PKGINFO 2> /dev/null
-                [[ $? -gt 0 ]] && continue
-                v2=$(grep pkgver .PKGINFO)
-                vc=$(vercmp "${v1##* }" "${v2##*= }")
-                [[ $vc -ge 0 ]] && d=1
-              done
-            else
-              d=1
-            fi
-            [[ $d == 1 ]] && rm -rf "$p"
-          done
+        if [[ -n $CLEAN ]]; then
+          CLEAN=all
+        else
+          CLEAN=outdated
         fi
-        unset v1 v2 vc
-        [[ $AURYEA_WRAP_PACMAN == 1 ]] && sudo pacman -Sc
-        ;;
-      -cc)
-        echo "cache directory: ${AURYEA_TMP_DIRECTORY}"
-        read -n1 -p "really really REALLY rm -rf it? cannot be undone, kills kittens, etc etc"
-        echo
-        if [[ $REPLY == [yY] ]]; then
-          rm -rf "${AURYEA_TMP_DIRECTORY}"
-        fi
-        [[ $AURYEA_WRAP_PACMAN == 1 ]] && sudo pacman -Scc
         ;;
       -s|--search)
-        ACTION=search
-        echo -n "searching AUR..."
-        r=$(aur search "$2")
-        rv=$?
-        case "$rv" in
-          10)
-            error "invalid operation"
-            return $rv
-            ;;
-          9)
-            echo -ne "\r"
-            error "$r"
-            return $rv
-            ;;
-          [1-8])
-            echo -e "\rwget failed. see \`man wget'" >&2
-            return $rv
-            ;;
-          0)
-            echo
-            print_pkg "$r"
-            [[ $AURYEA_PACMAN_SEARCH == 1 ]] && pacman -Ss "$2"
-            ;;
-        esac
+        SUBACTION=search
+        TARGET="$2"
         ;;
       -u|--sysupgrade)
-        local rv
-        if [[ $ACTION != "sync" ]]; then
-          error "invalid/no operation specified"
-          exit 1
-        fi
-        if [[ $AURYEA_WRAP_PACMAN == 1 ]]; then
-          shift
-          sudo pacman -Su $ao ${@:2:$#}
-          rv=$?
-          if [[ $rv -gt 0 ]]; then
-            local rv=$?
-            read -n1 -p "pacman borked. really attempt to upgrade AUR packages? (!recommended) [Y/n]"
-            [[ $REPLY != [Yy] ]] && exit $rv
-          fi
-        fi
-        echo "checking AUR for updates...this could take a while"
-        IFS=$'\n'
-        local ip ap pv vc
-        ap=( )
-        for p in $(pacman -Qme); do
-          ip="$(aur info ${p%% *})"
-          [[ $? -gt 0 ]] && continue
-          pv=$(gk "$ip" Version)
-          vc=$(vercmp "${p##* }" $pv)
-          if [[ $vc == 0 ]]; then
-            continue
-          elif [[ $vc == 1 ]]; then
-            warning "${AURYEA_COLOR_PACKAGE}$p\033[0m: local (${AURYEA_COLOR_VERSION}${p##* }\033[0m) is newer than AUR (${AURYEA_COLOR_VERSION}$pv\033[0m)"
-          else
-            echo -en " * ${AURYEA_COLOR_CATEGORY}${CATEGORIES[$(gk "$ip" CategoryID)]}\033[0m"
-            echo -en "/${AURYEA_COLOR_PACKAGE}${p%% *}\033[0m"
-            echo -e "(${AURYEA_COLOR_VERSION}${p##* }\033[0m -> ${AURYEA_COLOR_VERSION}$pv\033[0m)"
-            ap+=( "${p%% *}" "$pv" "$(gk "$ip" URLPath)")
-          fi
-        done
-        unset IFS
-        read -n1 -p "upgrade these packages? [Y/n] "
-        [[ $REPLY != [Yy] ]] && exit
-        echo
-        for ((i=0; i<${#ap[@]}; i=i+3)); do
-          echo "upgrading ${ap[$i]}..."
-          install "${ap[$i]}" "${ap[$((i+2))]}"
-        done
-        unset ip ap v2 vc
+        SUBACTION=upgrade
+        ;;
+      -h|--help)
+        SUBACTION=help
         ;;
       --)
         shift
         case "$ACTION" in
           sync)
-            for p in "$@"; do
-              install "$p"
-            done
+            [[ -n $CLEAN ]] && clean "$CLEAN"
+            case "$SUBACTION" in
+              '')
+                [[ -z "$@" ]] && error "no targets specified (use -h for help)"
+                for p in "$@"; do
+                  install "$p"
+                done
+                ;;
+              search)
+                search "$TARGET"
+                ;;
+              upgrade)
+                upgrade
+                ;;
+              help)
+                # TODO: actually display the help for different actions...
+                usage
+                ;;
+            esac
+            ;;
+          query)
+            [[ $AURYEA_WRAP_PACMAN -ne 1 ]] && return
+            case "$SUBACTION" in
+              '')
+                pacman $UNHANDLED $@
+                ;;
+              search)
+                pacman $UNHANDLED -s "$TARGET" $@
+                ;;
+            esac
+            ;;
+          '')
+            case "$SUBACTION" in
+              help)
+                usage $UNHANDLED $@
+                exit
+                ;;
+            esac
+            usage
             ;;
           *)
-            [[ $AURYEA_WRAP_PACMAN == 1 ]] && sudo pacman $ao $@
+            if [[ $AURYEA_WRAP_PACMAN == 1 ]]; then
+              if grep -q '\-R' <<< "$UNHANDLED"; then
+                sudo pacman $UNHANDLED $@
+              else
+                pacman $UNHANDLED $@
+              fi
+            fi
             # TODO: handle replacing packages
             ;;
         esac
         break
         ;;
       -*)
-        ao+="$1 "
+        UNHANDLED+="$1 "
         ;;
     esac
     shift
