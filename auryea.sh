@@ -128,7 +128,7 @@ pacman () {
   if builtin type -P pacman-color &> /dev/null; then
     pacman-color $@
   else
-    pacman $@
+    command pacman $@
   fi
 }
 
