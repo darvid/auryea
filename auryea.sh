@@ -336,20 +336,21 @@ install () {
     unset depends
     . PKGBUILD
     if [[ "${#depends[@]}" -gt 0 ]]; then
-      echo "parsing dependencies..."
-      for p in "${depends[@]}"; do
-        if ! pacman -T "$p" &> /dev/null; then
-          echo -n "resolving dependency: $p"
-          if pacman -Si "${p%%[<>=]*}" &> /dev/null; then
-            echo " (pacman)"
-            sudo pacman -S "$p"
-          else
-            echo " (auryea)"
-            AURYEA_NO_REINSTALL=1 install "$p"
-          fi
+    echo "parsing dependencies..."
+    depends=( ${depends[@]} ${makedepends[@]} )
+    for p in ${depends[@]}; do
+      if ! pacman -T "$p" &> /dev/null; then
+        echo -n "resolving dependency: $p"
+        if pacman -Si "${p%%[<>=]*}" &> /dev/null; then
+          echo " (pacman)"
+          sudo pacman -S "$p"
+        else
+          echo " (auryea)"
+          AURYEA_NO_REINSTALL=1 install "$p"
         fi
-      done
-    fi
+      fi
+    done
+  fi
   fi
   makepkg $MAKEPKG_OPTS
   if [[ $? -gt 0 ]]; then
