@@ -170,6 +170,7 @@ shell () {
         $SHELL
       fi
     fi
+    [[ $REPLY == [Yy] ]] && return 0 || return 1
   fi
 }
 
@@ -287,21 +288,34 @@ upgrade () {
 }
 
 install () {
-  local i o r
-  r=$(aur info "$1")
+  local i o r v1 v2 vc op
+  r=$(aur info "${1%%[<>=]*}")
   if [[ $? == 9 && $AURYEA_WRAP_PACMAN == 1 ]]; then
     error "couldn't find package '${1}' in AUR, falling back to pacman"
     sudo pacman -S "$1"
     exit $?
   fi
+  v1=${1##*[<>=]}
+  v2=$(gk "$r" Version)
+  vc=$(vercmp "$v1" "$v2")
+  op=$(egrep -o "[<>=]+" <<< "$1")
+  if [[ $? == 0 ]]; then
+    if [[ $op == ">" && $vc -ge 0 ]] || \
+       [[ $op == "<" && $vc -le 0 ]] || \
+       [[ $op == "=" && $vc -ne 0 ]] || \
+       [[ $op == ">=" && $vc -gt 0 ]] || \
+       [[ $op == "<=" && $vc -lt 0 ]]; then
+      error "could not resolve \`$p' ($v2 available in AUR)"
+      exit 1
+    fi
+  fi
   i=$(pacman -Q "$1" 2> /dev/null)
   if [[ $? != 0 ]]; then
     echo "syncing \`$p'..."
   else
-    local v1 v2 vc
     v1=${i##* }
     v2=$(gk "$r" Version)
-    vc=$(vercmp $v1 $v2)
+    vc=$(vercmp "$v1" "$v2")
     if [[ $vc == 0 && $AURYEA_NO_REINSTALL != 1 ]]; then
       warning "$(color pkg $i) is up to date -- reinstalling"
     elif [[ $vc == 0 && $AURYEA_NO_REINSTALL == 1 ]]; then
@@ -333,34 +347,44 @@ install () {
   cd "${x%%.*}"
   shell "drop into $(basename $SHELL) @ $PWD? [Y/n] "
   if [[ $AURYEA_PARSE_DEPENDS == 1 ]]; then
-    unset depends
-    . PKGBUILD
-    if [[ "${#depends[@]}" -gt 0 ]]; then
-    echo "parsing dependencies..."
-    depends=( ${depends[@]} ${makedepends[@]} )
-    for p in ${depends[@]}; do
-      if ! pacman -T "$p" &> /dev/null; then
-        echo -n "resolving dependency: $p"
-        if pacman -Si "${p%%[<>=]*}" &> /dev/null; then
-          echo " (pacman)"
-          sudo pacman -S "$p"
-        else
-          echo " (auryea)"
-          AURYEA_NO_REINSTALL=1 install "$p"
-        fi
-      fi
+    # LOL KISS COOL STORY
+    local depends alldepends
+    IFS=$'\n'
+    for dep in $(grep depends PKGBUILD); do
+      [[ "${dep%%\=*}" == "optdepends" ]] && continue;
+      unset depends
+      IFS=" " depends=( $(echo "${dep#*\=}" | tr -d "()'") )
+      alldepends=( ${alldepends[@]-} ${depends[@]} )
     done
+    # . PKGBUILD
+    if [[ "${#alldepends[@]}" -gt 0 ]]; then
+      echo "parsing dependencies..."
+      for p in ${alldepends[@]}; do
+        if ! pacman -T "$p" &> /dev/null; then
+          echo -n "resolving dependency: $p"
+          if pacman -Si "${p%%[<>=]*}" &> /dev/null; then
+            echo " (pacman)"
+            sudo pacman -S "$p"
+          else
+            echo " (auryea)"
+            AURYEA_NO_REINSTALL=1 install "$p"
+          fi
+        fi
+      done
+    fi
   fi
-  fi
-  makepkg $MAKEPKG_OPTS
-  if [[ $? -gt 0 ]]; then
-    error "makepkg failed - abort! abort!"
-    shell "drop into $(basename $SHELL) again for troubleshooting? [Y/n] "
-    # TODO: prompt and attempt to rebuild the package
-    exit 1
-  else
-    echo "installed package \`${1}' at $(date)"
-  fi
+  local reply=0
+  while [[ $reply == 0 ]]; do
+    makepkg $MAKEPKG_OPTS
+    if [[ $? -ne 0 ]]; then
+      error "makepkg failed - abort! abort!"
+      shell "drop into $(basename $SHELL) again for troubleshooting? [Y/n] "
+      reply=$?
+      # TODO: prompt to run makepkg again
+    else
+      echo "installed package \`${1}' at $(date)"
+    fi
+  done
 }
 
 aur () {
