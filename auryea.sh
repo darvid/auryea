@@ -347,19 +347,12 @@ install () {
   cd "${x%%.*}"
   shell "drop into $(basename $SHELL) @ $PWD? [Y/n] "
   if [[ $AURYEA_PARSE_DEPENDS == 1 ]]; then
-    # LOL KISS COOL STORY
-    local depends alldepends
-    IFS=$'\n'
-    for dep in $(grep depends PKGBUILD); do
-      [[ "${dep%%\=*}" == "optdepends" ]] && continue;
-      unset depends
-      IFS=" " depends=( $(echo "${dep#*\=}" | tr -d "()'") )
-      alldepends=( ${alldepends[@]-} ${depends[@]} )
-    done
-    # . PKGBUILD
-    if [[ "${#alldepends[@]}" -gt 0 ]]; then
+    . PKGBUILD
+    depends=( ${depends[@]} ${makedepends[@]} )
+    echo "${depends[@]}"
+    if [[ "${#depends[@]}" -gt 0 ]]; then
       echo "parsing dependencies..."
-      for p in ${alldepends[@]}; do
+      for p in ${depends[@]}; do
         if ! pacman -T "$p" &> /dev/null; then
           echo -n "resolving dependency: $p"
           if pacman -Si "${p%%[<>=]*}" &> /dev/null; then
