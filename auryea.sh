@@ -373,14 +373,14 @@ install () {
       done
     fi
   fi
-  local reply=0
-  while [[ $reply == 0 ]]; do
+  local mprv=1
+  while [[ $mprv -ne 0 ]]; do
     makepkg $MAKEPKG_OPTS
-    if [[ $? -ne 0 ]]; then
+    mprv=$?
+    if [[ $mprv -ne 0 ]]; then
       error "makepkg failed - abort! abort!"
       shell "drop into $(basename $SHELL) again for troubleshooting? [Y/n] "
-      reply=$?
-      # TODO: prompt to run makepkg again
+      [[ $? == 1 ]] && exit 1;
     else
       echo "installed package \`${1}' at $(date)"
     fi
@@ -451,6 +451,12 @@ main () {
           CLEAN=all
         else
           CLEAN=outdated
+        fi
+        ;;
+      -f|--force)
+        [[ $ACTION -ne 'sync' ]] && error "force can only be used with -S"
+        if [[ $MAKEPKG_OPTS =~ '-i' ]]; then
+          PACMAN="pacman -f"
         fi
         ;;
       -s|--search)
