@@ -9,7 +9,7 @@ setenv () {
 
 setenv MAKEPKG_OPTS "-i"
 setenv AURYEA_WRAP_PACMAN 1
-setenv AURYEA_PACMAN_SEARCH 1
+setenv AURYEA_PACMAN_SEARCH 0
 setenv AURYEA_USE_SHELL 1
 setenv AURYEA_SHELL_NOPROFILE 1
 setenv AURYEA_TMP_DIRECTORY "/tmp/auryea-${USER}"
@@ -133,17 +133,21 @@ pacman () {
 }
 
 print_pkg () {
-  mapfile -t arr <<< "$1"
-  for ((i=0; i<"${#arr[@]}"; i++)); do
-    local category="${CATEGORIES[$(gk "${arr[$i]}" CategoryID)]}"
-    local name="$(gk "${arr[$i]}" Name)"
+  IFS=$'\n'
+  local r=( $1 )
+  for p in "${r[@]}"; do
+    local name="$(gk "$p" Name)"
+    if [[ -n "$2" ]] && [[ ! "$name" =~ $2 ]]; then
+      continue
+    fi
+    local category="${CATEGORIES[$(gk "$p" CategoryID)]}"
     # TODO: permanent fix for JSON collections that span multiple lines
     # f.ex, see the output of http://aur.archlinux.org/rpc.php?type=search&arg=goggles
     [[ -z $name || -z $category ]] && continue
-    echo -en "$(color cat $category)/$(color pkg $name) $(color ver $(gk "${arr[$i]}" Version))"
+    echo -en "$(color cat $category)/$(color pkg $name) $(color ver $(gk "$p" Version))"
     if [[ $ACTION == "search" && $AURYEA_COMPACT_SEARCH != 1 || $ACTION == "sync" ]]; then
       echo
-      echo -e "$(gk "${arr[$i]}" Description | fold -s -w$(($(tput cols)-4)) | sed 's/\(.*\)/    \1/')"
+      echo -e "$(gk "$p" Description | fold -s -w$(($(tput cols)-4)) | sed 's/\(.*\)/    \1/')"
     fi
   done
 }
@@ -231,7 +235,7 @@ search () {
       return $rv
       ;;
     [1-8])
-      echo -e "\rwget failed. see \`man wget'" >&2
+      echo -e "\rwget failed. this shouldn't happen. :|" >&2
       return $rv
       ;;
     0)
@@ -288,7 +292,33 @@ upgrade () {
 }
 
 install () {
-  local i o r v1 v2 vc op
+  local i o r pk v1 v2 vc op
+  echo -n "searching AUR..."
+  if [[ -n "$1" ]] && [[ "$1" =~ "*" ]]; then
+    r=$(aur search "$1")
+    IFS=$'\n'
+    for p in $r; do
+      local name=$(gk "$p" "Name")
+      pk=( ${pk[@]} "$name" )
+      [[ ! "$name" =~ $1 ]] && return
+    done
+    if [[ "${#pk[@]}" > 0 ]]; then
+      echo -e "\rinstalling the following packages:"
+      echo
+      for p in "${pk[@]}"; do
+        echo "    * $(color package $p)"
+      done
+      echo
+      read -n1 -p "continue? [Y/n] "
+      echo
+      if [[ $REPLY == [yY] ]]; then
+        for p in "${pk[@]}"; do
+          install "$p"
+        done
+      fi
+    fi
+    return $?
+  fi
   r=$(aur info "${1%%[<>=]*}")
   if [[ $? == 9 && $AURYEA_WRAP_PACMAN == 1 ]]; then
     error "couldn't find package '${1}' in AUR, falling back to pacman"
@@ -311,7 +341,7 @@ install () {
   fi
   i=$(pacman -Q "$1" 2> /dev/null)
   if [[ $? != 0 ]]; then
-    echo "syncing \`$p'..."
+    echo -e "\rsyncing \`$p'..."
   else
     v1=${i##* }
     v2=$(gk "$r" Version)
@@ -381,16 +411,40 @@ install () {
 }
 
 aur () {
-  o="$(wget -q -O- "${RPCURL}?type=${1}&arg=${2}")"
+  local q g
+  q="$2"
+  if [[ "$2" =~ "*" ]]; then
+    g=1
+    if [[ -n "${2%%.\**}" ]]; then
+      q="${2%%.\**}"
+    elif [[ -n "${2##*.\*}" ]]; then
+      q="${2##*.\*}"
+    else
+      error "invalid query: '$2'"
+      return 1
+    fi
+  fi
+  o="$(wget -q -O- "${RPCURL}?type=${1}&arg=${q}")"
   [[ $? -gt 0 ]] && return $?
   if [[ $(gk "$o" "type") == 'error' ]]; then
-    # error "$(gk "$o" "results")"
     echo "$(gk "$o" "results")"
     return 9
   fi
   case "$1" in
     search|msearch)
-      egrep -o "\"results\":\[\{.*\}\]" <<< "$o" | egrep -o '("[^"]+":"[^"]+",?)+'
+      IFS=$'\n'
+      local r=$(egrep -o "\"results\":\[\{.*\}\]" <<< "$o" |\
+           egrep -o '("[^"]+":"[^"]+",?)+')
+      local ra=( $r )
+      if [[ $g == 1 ]]; then
+        for p in "${ra[@]}"; do
+          local name=$(gk "$p" "Name")
+          [[ -n "$name" ]] && [[ "$name" =~ $2 ]] && echo "$p"
+        done
+        return 0
+      else
+        echo "$r"
+      fi
       ;;
     info)
       egrep -o "\"results\":\{.*\}" <<< "$o" | cut -b12-
@@ -529,3 +583,4 @@ main () {
 
 trap sigint SIGINT
 main "$@"
+
