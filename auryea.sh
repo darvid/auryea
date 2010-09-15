@@ -48,6 +48,7 @@ CATEGORIES=(
   [18]='xfce'
   [19]='kernels'
 )
+IGNORE=( )
 
 error () {
   echo -e "${AURYEA_COLOR_ERROR}error:\033[0m $*" >&2
@@ -67,6 +68,14 @@ if [[ $UID == 0 ]]; then
   warning "running as root can kill kittens"
   MAKEPKG_OPTS+=" --asroot"
 fi
+
+ignored () {
+  [[ -z "$1" ]] && return 1
+  for i in ${IGNORE[@]}; do
+    [[ "$1" == $i ]] && return 0
+  done
+  return 1
+}
 
 color () {
   if [[ $AURYEA_COLOR_ENABLE == 1 ]]; then
@@ -292,9 +301,9 @@ upgrade () {
 }
 
 install () {
-  local i o r pk v1 v2 vc op
-  echo -n "searching AUR..."
+  local i o r rv pk v1 v2 vc op
   if [[ -n "$1" ]] && [[ "$1" =~ "*" ]]; then
+    echo -n "searching AUR..."
     r=$(aur search "$1")
     IFS=$'\n'
     for p in $r; do
@@ -319,8 +328,12 @@ install () {
     fi
     return $?
   fi
+  ignored "${1%%[<>=]*}" && return 1
+  echo -n "searching AUR..."
   r=$(aur info "${1%%[<>=]*}")
-  if [[ $? == 9 && $AURYEA_WRAP_PACMAN == 1 ]]; then
+  rv=$?
+  echo -en "\r"
+  if [[ $rv == 9 && $AURYEA_WRAP_PACMAN == 1 ]]; then
     error "couldn't find package '${1}' in AUR, falling back to pacman"
     sudo pacman -S "$1"
     exit $?
@@ -339,7 +352,6 @@ install () {
       exit 1
     fi
   fi
-  echo -e "\r"
   i=$(pacman -Q "$1" 2> /dev/null)
   if [[ $? != 0 ]]; then
     echo "syncing \`$p'..."
@@ -505,6 +517,10 @@ main () {
         if [[ $MAKEPKG_OPTS =~ '-i' ]]; then
           PACMAN="pacman -f"
         fi
+        ;;
+      --ignore)
+        [[ $ACTION -ne 'sync' ]] && error "ignore only supported by -S"
+        IGNORE=( $(echo "$2" | tr "," " ") )
         ;;
       -s|--search)
         SUBACTION=search
