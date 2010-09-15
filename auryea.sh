@@ -65,7 +65,7 @@ sigint () {
 
 if [[ $UID == 0 ]]; then
   warning "running as root can kill kittens"
-  MAKEPKG_OPTS="${MAKEPKG_OPTS} --asroot"
+  MAKEPKG_OPTS+=" --asroot"
 fi
 
 color () {
@@ -278,7 +278,7 @@ upgrade () {
     else
       echo -en " * $(color cat ${CATEGORIES[$(gk "$ip" CategoryID)]})"
       echo -e "/$(color pkg ${p%% *}) ($(color ver $lv) -> $(color ver $pv))"
-      ap+=( "${p%% *}" "$pv" "$(gk "$ip" URLPath)")
+      ap+=( "${p%% *}" "$pv" "$(gk "$ip" URLPath)" )
     fi
   done
   unset IFS
@@ -339,9 +339,10 @@ install () {
       exit 1
     fi
   fi
+  echo -e "\r"
   i=$(pacman -Q "$1" 2> /dev/null)
   if [[ $? != 0 ]]; then
-    echo -e "\rsyncing \`$p'..."
+    echo "syncing \`$p'..."
   else
     v1=${i##* }
     v2=$(gk "$r" Version)
@@ -379,7 +380,6 @@ install () {
   if [[ $AURYEA_PARSE_DEPENDS == 1 ]]; then
     . PKGBUILD
     depends=( ${depends[@]} ${makedepends[@]} )
-    echo "${depends[@]}"
     if [[ "${#depends[@]}" -gt 0 ]]; then
       echo "parsing dependencies..."
       for p in ${depends[@]}; do
@@ -398,7 +398,7 @@ install () {
   fi
   local mprv=1
   while [[ $mprv -ne 0 ]]; do
-    makepkg $MAKEPKG_OPTS
+    eval makepkg $MAKEPKG_OPTS
     mprv=$?
     if [[ $mprv -ne 0 ]]; then
       error "makepkg failed - abort! abort!"
