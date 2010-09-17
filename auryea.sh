@@ -1,13 +1,15 @@
 #!/bin/bash
 
 setenv () {
-  if [[ -z "${!1}" ]]; then
+  printenv $1 > /dev/null
+  if [[ $? != 0 ]]; then
     read -r $1 <<< "$2"
     export $1
   fi
 }
 
-setenv MAKEPKG_OPTS "-i"
+setenv PACMAN_OPTS ""
+setenv MAKEPKG_OPTS ""
 setenv AURYEA_WRAP_PACMAN 1
 setenv AURYEA_PACMAN_SEARCH 0
 setenv AURYEA_USE_SHELL 1
@@ -133,6 +135,7 @@ sudo () {
   return $?
 }
 
+# TODO: stop using this fail function
 pacman () {
   if builtin type -P pacman-color &> /dev/null; then
     pacman-color $@
@@ -412,13 +415,18 @@ install () {
   while [[ $mprv -ne 0 ]]; do
     eval makepkg $MAKEPKG_OPTS
     mprv=$?
-    if [[ $mprv -ne 0 ]]; then
+    # TODO: makepkg return value always either totally ambiguous
+    # (1 on ANY error) or totally stupid (0 on pacman failure).
+    if [[ $mprv != 0 ]]; then
       error "makepkg failed - abort! abort!"
       shell "drop into $(basename $SHELL) again for troubleshooting? [Y/n] "
       [[ $? == 1 ]] && exit 1;
-    else
-      echo "installed package \`${1}' at $(date)"
     fi
+    if [[ ! "$MAKEPKG_OPTS" =~ "-i" ]]; then
+      eval sudo pacman -U${PACMAN_OPTS} "${x%%.*}-${v2}-$(uname -m).pkg.tar.gz"
+    fi
+    [[ ( $? == 0 ) || ( $mprv == 0 ) ]] && \
+    echo "installed package \`${1}' at $(date)"
   done
 }
 
@@ -514,9 +522,9 @@ main () {
         ;;
       -f|--force)
         [[ $ACTION -ne 'sync' ]] && error "force can only be used with -S"
-        if [[ $MAKEPKG_OPTS =~ '-i' ]]; then
-          PACMAN="pacman -f"
-        fi
+        [[ $MAKEPKG_OPTS =~ "-i" ]] && PACMAN="pacman -f"
+        [[ ! $MAKEPKG_OPTS =~ "-f" ]] && MAKEPKG_OPTS+=" -f"
+        [[ ! $MAKEPKG_OPTS =~ "-i" ]] && PACMAN_OPTS+=" -f"
         ;;
       --ignore)
         [[ $ACTION -ne 'sync' ]] && error "ignore only supported by -S"
@@ -599,4 +607,3 @@ main () {
 
 trap sigint SIGINT
 main "$@"
-
