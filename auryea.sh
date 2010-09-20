@@ -423,7 +423,7 @@ install () {
       [[ $? == 1 ]] && exit 1;
     fi
     if [[ ! "$MAKEPKG_OPTS" =~ "-i" ]]; then
-      eval sudo pacman -U${PACMAN_OPTS} "${x%%.*}-${v2}-$(uname -m).pkg.tar.gz"
+      eval sudo pacman -U${PACMAN_OPTS} "${x%%.*}-${v2}-*.pkg.tar.gz"
     fi
     [[ ( $? == 0 ) || ( $mprv == 0 ) ]] && \
     echo "installed package \`${1}' at $(date)"
