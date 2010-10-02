@@ -420,10 +420,11 @@ install () {
     if [[ $mprv != 0 ]]; then
       error "makepkg failed - abort! abort!"
       shell "drop into $(basename $SHELL) again for troubleshooting? [Y/n] "
-      [[ $? == 1 ]] && exit 1;
+      [[ $? == 1 ]] && exit 1 || continue;
     fi
     if [[ ! "$MAKEPKG_OPTS" =~ "-i" ]]; then
-      eval sudo pacman -U${PACMAN_OPTS} "${x%%.*}-${v2}-*.pkg.tar.gz"
+      . PKGBUILD
+      eval sudo pacman -U${PACMAN_OPTS} "${x%%.*}-${pkgver}-*.pkg.tar.gz"
     fi
     [[ ( $? == 0 ) || ( $mprv == 0 ) ]] && \
     echo "installed package \`${1}' at $(date)"
