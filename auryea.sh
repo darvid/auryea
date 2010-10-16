@@ -393,7 +393,7 @@ install () {
   cd "${x%%.*}"
   shell "drop into $(basename $SHELL) @ $PWD? [Y/n] "
   if [[ $AURYEA_PARSE_DEPENDS == 1 ]]; then
-    . PKGBUILD
+    . PKGBUILD 2> /dev/null
     depends=( ${depends[@]} ${makedepends[@]} )
     if [[ "${#depends[@]}" -gt 0 ]]; then
       echo "parsing dependencies..."
@@ -417,14 +417,16 @@ install () {
     mprv=$?
     # TODO: makepkg return value always either totally ambiguous
     # (1 on ANY error) or totally stupid (0 on pacman failure).
+    # The only workaround is to pipe output somewhere and parse it.
     if [[ $mprv != 0 ]]; then
       error "makepkg failed - abort! abort!"
       shell "drop into $(basename $SHELL) again for troubleshooting? [Y/n] "
       [[ $? == 1 ]] && exit 1 || continue;
     fi
     if [[ ! "$MAKEPKG_OPTS" =~ "-i" ]]; then
-      . PKGBUILD
-      eval sudo pacman -U${PACMAN_OPTS} "${x%%.*}-${pkgver}-*.pkg.tar.gz"
+      [[ "${arch[1]}" == "any" ]] && arch="any" || arch=$(uname -m)
+      eval sudo pacman -U${PACMAN_OPTS} \
+        "${x%%.*}-${pkgver}-${pkgrel}-${arch}.pkg.tar.gz"
     fi
     [[ ( $? == 0 ) || ( $mprv == 0 ) ]] && \
     echo "installed package \`${1}' at $(date)"
