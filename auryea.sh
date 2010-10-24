@@ -377,20 +377,21 @@ install () {
   fi
   local n=$(gk "$r" Name)
   local u=$(gk "$r" URLPath)
+  u="${u//\\}"
   mkdir -p "$AURYEA_TMP_DIRECTORY/$n" &> /dev/null
   if [[ $? -gt 0 ]]; then
     error "unable to create temp directory"
     exit 1
   fi
   cd "$AURYEA_TMP_DIRECTORY/$n"
-  wget -nc "${BASEURL}/${u//\\}" 2>/dev/null
+  wget -nc "${BASEURL}/$u" 2>/dev/null
   if [[ $? -gt 0 ]]; then
     error "wget borked (returned ${?})!"
     return 1
   fi
-  local x="${u##*/}"
-  tar xzf "$x"
-  cd "${x%%.*}"
+  tar xzf "${u##/packages/*/}"
+  local x="${u##/packages/}"
+  cd "${x%%/*}"
   shell "drop into $(basename $SHELL) @ $PWD? [Y/n] "
   if [[ $AURYEA_PARSE_DEPENDS == 1 ]]; then
     . PKGBUILD 2> /dev/null
