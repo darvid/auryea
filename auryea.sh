@@ -425,9 +425,10 @@ install () {
       [[ $? == 1 ]] && exit 1 || continue;
     fi
     if [[ ! "$MAKEPKG_OPTS" =~ "-i" ]]; then
-      [[ "${arch[0]}" == "any" ]] && arch="${arch[0]}" || arch=$(uname -m)
-      eval sudo pacman -U${PACMAN_OPTS} \
-        "${x%%.*}-${pkgver}-${pkgrel}-${arch}.pkg.tar.gz"
+      eval sudo pacman -U "$(ls -rt *.tar.*z | head -n1)"
+      # [[ "${arch[0]}" == "any" ]] && arch="${arch[0]}" || arch=$(uname -m)
+      # eval sudo pacman -U${PACMAN_OPTS} \
+      #   "${x%%.*}-${pkgver}-${pkgrel}-${arch}.pkg.tar.gz"
     fi
     [[ ( $? == 0 ) || ( $mprv == 0 ) ]] && \
     echo "installed package \`${1}' at $(date)"
