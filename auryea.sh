@@ -425,7 +425,8 @@ install () {
       [[ $? == 1 ]] && exit 1 || continue;
     fi
     if [[ ! "$MAKEPKG_OPTS" =~ "-i" ]]; then
-      eval sudo pacman -U "$(ls -rt *.tar.*z | head -n1)"
+      ls -rt *.tar.*z | head -n1
+      sudo pacman -U "$(ls -t *.tar.*z | head -n1)"
       # [[ "${arch[0]}" == "any" ]] && arch="${arch[0]}" || arch=$(uname -m)
       # eval sudo pacman -U${PACMAN_OPTS} \
       #   "${x%%.*}-${pkgver}-${pkgrel}-${arch}.pkg.tar.gz"
