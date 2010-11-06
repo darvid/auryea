@@ -168,7 +168,13 @@ print_pkg () {
     fi
     if [[ $ACTION == "search" && $AURYEA_COMPACT_SEARCH != 1 || $ACTION == "sync" ]]; then
       echo
-      echo -e "$(gk "$p" Description | fold -s -w$(($(tput cols)-4)) | sed 's/\(.*\)/    \1/')"
+      local c=$((${#NUM_PACKAGES} + 2))
+      local d="$(gk "$p" Description | fold -s -w$(($(tput cols)-$c)))"
+      local line
+      while read line; do
+        for ((i=0; i<$c; i++)); do echo -n " "; done
+        echo "$line"
+      done <<< "$d"
     fi
   done
 }

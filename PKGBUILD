@@ -2,7 +2,7 @@
 
 name=auryea
 pkgname="${name}-hg"
-pkgver=34
+pkgver=36
 pkgrel=1
 source=()
 md5sums=()
