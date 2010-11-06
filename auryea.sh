@@ -145,18 +145,27 @@ pacman () {
 }
 
 print_pkg () {
+  local p i v
   IFS=$'\n'
   local r=( $1 )
+  NUM_PACKAGES=0
   for p in "${r[@]}"; do
     local name="$(gk "$p" Name)"
-    if [[ -n "$2" ]] && [[ ! "$name" =~ $2 ]]; then
-      continue
-    fi
+    [[ -n "$2" ]] && [[ ! "$name" =~ $2 ]] && continue
     local category="${CATEGORIES[$(gk "$p" CategoryID)]}"
     # TODO: permanent fix for JSON collections that span multiple lines
     # f.ex, see the output of http://aur.archlinux.org/rpc.php?type=search&arg=goggles
     [[ -z $name || -z $category ]] && continue
-    echo -en "$(color cat $category)/$(color pkg $name) $(color ver $(gk "$p" Version))"
+    NUM_PACKAGES=$(($NUM_PACKAGES + 1))
+    echo -en "$NUM_PACKAGES. $(color cat $category)/$(color pkg $name) "
+    echo -en "$(color ver $(gk "$p" Version))"
+    i=$(pacman -Q "$name" 2> /dev/null)
+    if [[ $? == 0 ]]; then
+      echo -en " ${AURYEA_COLOR_ERROR}[installed"
+      v="${i##* }"
+      [[ "$v" != "$(gk "$p" Version)" ]] && echo -en "\033[0m:$(color ver $v)"
+      echo -en "${AURYEA_COLOR_ERROR}]\033[0m"
+    fi
     if [[ $ACTION == "search" && $AURYEA_COMPACT_SEARCH != 1 || $ACTION == "sync" ]]; then
       echo
       echo -e "$(gk "$p" Description | fold -s -w$(($(tput cols)-4)) | sed 's/\(.*\)/    \1/')"
@@ -253,6 +262,7 @@ search () {
     0)
       echo
       print_pkg "$r"
+      PACKAGE_DUMP="$r"
       [[ $AURYEA_PACMAN_SEARCH == 1 ]] && pacman -Ss "$1"
       ;;
   esac
@@ -304,7 +314,7 @@ upgrade () {
 }
 
 install () {
-  local i o r rv pk v1 v2 vc op
+  local i o p r rv pk v1 v2 vc op
   if [[ -n "$1" ]] && [[ "$1" =~ "*" ]]; then
     echo -n "searching AUR..."
     r=$(aur search "$1")
@@ -336,10 +346,40 @@ install () {
   r=$(aur info "${1%%[<>=]*}")
   rv=$?
   echo -en "\r"
-  if [[ $rv == 9 && $AURYEA_WRAP_PACMAN == 1 ]]; then
-    error "couldn't find package '${1}' in AUR, falling back to pacman"
-    sudo pacman -S "$1"
-    exit $?
+  if [[ $rv == 9 ]]; then
+    search "$1"
+    if [[ $AURYEA_WRAP_PACMAN == 1 ]] && [[ $NUM_PACKAGES == 0 ]]; then
+      error "couldn't find package '${1}' in AUR, falling back to pacman"
+      sudo pacman -S "$1"
+      exit $?
+    else
+      local valid=0
+      while [[ valid -ne 1 ]]; do
+        [[ $NUM_PACKAGES > 1 ]] && read -p "> " || REPLY=1
+        if [[ $REPLY == [Qq] ]]; then
+          exit
+        elif [[ ! $REPLY =~ ^[0-9]+$ ]] || [[ $REPLY > $NUM_PACKAGES ]] ||
+             [[ $REPLY == 0 ]]; then
+          error "invalid entry"
+          continue
+        else
+          IFS=$'\n'
+          local d=( $PACKAGE_DUMP )
+          local pi=0
+          for p in "${d[@]}"; do
+            local name="$(gk "$p" Name)"
+            local category="${CATEGORIES[$(gk "$p" CategoryID)]}"
+            [[ -z $name || -z $category ]] && continue
+            pi=$((pi + 1))
+            if [[ $pi == $REPLY ]]; then
+              [[ $REPLY == 1 ]] && export AURYEA_VERBOSE_INSTALL=0
+              install "$name"
+            fi
+          done
+          exit
+        fi
+      done
+    fi
   fi
   v1=${1##*[<>=]}
   v2=$(gk "$r" Version)
@@ -425,8 +465,7 @@ install () {
       [[ $? == 1 ]] && exit 1 || continue;
     fi
     if [[ ! "$MAKEPKG_OPTS" =~ "-i" ]]; then
-      ls -rt *.tar.*z | head -n1
-      sudo pacman -U "$(ls -t *.tar.*z | head -n1)"
+      sudo pacman -U "$(ls -t *.pkg.tar.*z | head -n1)"
       # [[ "${arch[0]}" == "any" ]] && arch="${arch[0]}" || arch=$(uname -m)
       # eval sudo pacman -U${PACMAN_OPTS} \
       #   "${x%%.*}-${pkgver}-${pkgrel}-${arch}.pkg.tar.gz"
