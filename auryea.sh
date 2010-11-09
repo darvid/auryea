@@ -166,8 +166,9 @@ print_pkg () {
       [[ "$v" != "$(gk "$p" Version)" ]] && echo -en "\033[0m:$(color ver $v)"
       echo -en "${AURYEA_COLOR_ERROR}]\033[0m"
     fi
-    if [[ $ACTION == "search" && $AURYEA_COMPACT_SEARCH != 1 || $ACTION == "sync" ]]; then
-      echo
+    echo
+    [[ $AURYEA_COMPACT_SEARCH == 1 ]] && continue
+    if [[ $ACTION == "search" || $ACTION == "sync" ]]; then
       local c=$((${#NUM_PACKAGES} + 2))
       local d="$(gk "$p" Description | fold -s -w$(($(tput cols)-$c)))"
       local line
@@ -403,7 +404,7 @@ install () {
   fi
   i=$(pacman -Q "$1" 2> /dev/null)
   if [[ $? != 0 ]]; then
-    echo "syncing \`$p'..."
+    echo "syncing \`$(gk "$r" Name)'..."
   else
     v1=${i##* }
     v2=$(gk "$r" Version)
@@ -471,10 +472,7 @@ install () {
       [[ $? == 1 ]] && exit 1 || continue;
     fi
     if [[ ! "$MAKEPKG_OPTS" =~ "-i" ]]; then
-      sudo pacman -U "$(ls -t *.pkg.tar.*z | head -n1)"
-      # [[ "${arch[0]}" == "any" ]] && arch="${arch[0]}" || arch=$(uname -m)
-      # eval sudo pacman -U${PACMAN_OPTS} \
-      #   "${x%%.*}-${pkgver}-${pkgrel}-${arch}.pkg.tar.gz"
+      sudo pacman -U${PACMAN_OPTS} "$(ls -t *.pkg.tar.*z | head -n1)"
     fi
     [[ ( $? == 0 ) || ( $mprv == 0 ) ]] && \
     echo "installed package \`${1}' at $(date)"
