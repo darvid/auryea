@@ -442,6 +442,7 @@ install () {
   cd "${x%%/*}"
   shell "drop into $(basename $SHELL) @ $PWD? [Y/n] "
   if [[ $AURYEA_PARSE_DEPENDS == 1 ]]; then
+    unset depends makedepends
     . PKGBUILD 2> /dev/null
     depends=( ${depends[@]} ${makedepends[@]} )
     if [[ "${#depends[@]}" -gt 0 ]]; then
