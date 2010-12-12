@@ -181,6 +181,7 @@ print_pkg () {
 }
 
 shell () {
+  [[ "$ACTION" != sync ]] && return
   if [[ $AURYEA_USE_SHELL == 1 ]]; then
     read -n1 -p "${1:-drop into a shell? [Y/n]}"
     echo
@@ -472,7 +473,7 @@ install () {
       [[ $? == 1 ]] && exit 1 || continue;
     fi
     if [[ ! "$MAKEPKG_OPTS" =~ "-i" ]]; then
-      sudo pacman -U${PACMAN_OPTS} "$(ls -t *.pkg.tar.*z | head -n1)"
+      eval sudo pacman -U $PACMAN_OPTS "$(ls -t *.pkg.tar.*z | head -n1)"
     fi
     [[ ( $? == 0 ) || ( $mprv == 0 ) ]] && \
     echo "installed package \`${1}' at $(date)"
