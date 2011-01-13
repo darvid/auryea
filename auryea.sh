@@ -486,10 +486,10 @@ aur () {
   q="$2"
   if [[ "$2" =~ "*" ]]; then
     g=1
-    if [[ -n "${2%%.\**}" ]]; then
-      q="${2%%.\**}"
-    elif [[ -n "${2##*.\*}" ]]; then
-      q="${2##*.\*}"
+    if [[ -n "${2%%\**}" ]]; then
+      q="${2%%\**}"
+    elif [[ -n "${2##*\*}" ]]; then
+      q="${2##*\*}"
     else
       error "invalid query: '$2'"
       return 1
@@ -510,7 +510,7 @@ aur () {
       if [[ $g == 1 ]]; then
         for p in "${ra[@]}"; do
           local name=$(gk "$p" "Name")
-          [[ -n "$name" ]] && [[ "$name" =~ $2 ]] && echo "$p"
+          [[ -n "$name" ]] && [[ "$name" =~ ${2/\*/.*} ]] && echo "$p"
         done
         return 0
       else
