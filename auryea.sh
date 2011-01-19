@@ -181,8 +181,7 @@ print_pkg () {
 }
 
 shell () {
-  [[ "$ACTION" != sync ]] && return
-  if [[ $AURYEA_USE_SHELL == 1 ]]; then
+  if [[ $AURYEA_USE_SHELL == 1 ]] && [[ $ACTION != sync ]]; then
     read -n1 -p "${1:-drop into a shell? [Y/n]}"
     echo
     if [[ $REPLY == [Yy] ]]; then
@@ -205,6 +204,7 @@ shell () {
     fi
     [[ $REPLY == [Yy] ]] && return 0 || return 1
   fi
+  return 0
 }
 
 clean () {
@@ -356,7 +356,8 @@ install () {
   echo -en "\r"
   if [[ $rv == 9 ]]; then
     search "$1"
-    if [[ $AURYEA_WRAP_PACMAN == 1 ]] && [[ $NUM_PACKAGES == 0 ]]; then
+    [[ -z $NUM_PACKAGES ]] || [[ $NUM_PACKAGES == 0 ]] && continue
+    if [[ $AURYEA_WRAP_PACMAN == 1 ]]; then
       error "couldn't find package '${1}' in AUR, falling back to pacman"
       sudo pacman -S "$1"
       exit $?
